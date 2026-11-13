@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.api
+    container_name: roadaid-api-prod
+    restart: always
+    env_file: .env.production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.admin
+    container_name: roadaid-admin-prod
+    restart: always
+    env_file: .env.production
+    ports:
+      - "3001:3000"
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: roadaid-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-roadaid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-roadaid_secure_db_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-roadaid}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-roadaid} -d ${POSTGRES_DB:-roadaid}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: roadaid-redis-prod
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-secure_redis_pass}
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:

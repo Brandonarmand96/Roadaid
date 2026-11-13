@@ -1,0 +1,131 @@
+export enum Role {
+  CUSTOMER = 'CUSTOMER',
+  PROVIDER = 'PROVIDER',
+  ADMIN = 'ADMIN',
+}
+
+export enum AdminRole {
+  SUPER_ADMIN = 'SUPER_ADMIN',
+  OPERATIONS = 'OPERATIONS',
+  FINANCE = 'FINANCE',
+}
+
+export enum UserStatus {
+  ACTIVE = 'ACTIVE',
+  SUSPENDED = 'SUSPENDED',
+  DELETED = 'DELETED',
+}
+
+export enum ServiceType {
+  FUEL = 'FUEL',
+  TOWING = 'TOWING',
+  LOCKOUT = 'LOCKOUT',
+}
+
+export enum ApprovalStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  SUSPENDED = 'SUSPENDED',
+}
+
+export enum OnboardingStatus {
+  DRAFT = 'DRAFT',
+  SUBMITTED = 'SUBMITTED',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  SUSPENDED = 'SUSPENDED',
+}
+
+export enum ProviderAvailability {
+  OFFLINE = 'OFFLINE',
+  ONLINE = 'ONLINE',
+  RESERVED = 'RESERVED',
+  BUSY = 'BUSY',
+  UNAVAILABLE = 'UNAVAILABLE',
+}
+
+export enum RequestStatus {
+  REQUESTED = 'REQUESTED',
+  SEARCHING = 'SEARCHING',
+  ASSIGNED = 'ASSIGNED',
+  EN_ROUTE = 'EN_ROUTE',
+  ARRIVED = 'ARRIVED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  ESCALATED = 'ESCALATED',
+}
+
+export enum OfferStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  EXPIRED = 'EXPIRED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum PaymentStatus {
+  NONE = 'NONE',
+  PENDING = 'PENDING',
+  PAID = 'PAID',
+  FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
+}
+
+export enum CancelledBy {
+  CUSTOMER = 'CUSTOMER',
+  PROVIDER = 'PROVIDER',
+  ADMIN = 'ADMIN',
+  SYSTEM = 'SYSTEM',
+}
+
+export enum PayoutStatus {
+  REQUESTED = 'REQUESTED',
+  APPROVED = 'APPROVED',
+  PAID = 'PAID',
+  REJECTED = 'REJECTED',
+}
+
+export enum LedgerEntryType {
+  CUSTOMER_PAYMENT = 'CUSTOMER_PAYMENT',
+  PROVIDER_EARNING = 'PROVIDER_EARNING',
+  PLATFORM_COMMISSION = 'PLATFORM_COMMISSION',
+  PAYOUT = 'PAYOUT',
+  REFUND = 'REFUND',
+  ADJUSTMENT = 'ADJUSTMENT',
+}
+
+export enum VehicleType {
+  CAR = 'CAR',
+  SUV = 'SUV',
+  VAN = 'VAN',
+  TRUCK = 'TRUCK',
+  MOTORCYCLE = 'MOTORCYCLE',
+}
+
+export enum DocumentType {
+  NATIONAL_ID = 'NATIONAL_ID',
+  DRIVERS_LICENCE = 'DRIVERS_LICENCE',
+  VEHICLE_PAPERS = 'VEHICLE_PAPERS',
+  EQUIPMENT_PHOTO = 'EQUIPMENT_PHOTO',
+  PROFILE_PHOTO = 'PROFILE_PHOTO',
+  OTHER = 'OTHER',
+}
+
+export enum LockType {
+  KEYS_INSIDE = 'KEYS_INSIDE',
+  LOST_KEY = 'LOST_KEY',
+  BROKEN_KEY = 'BROKEN_KEY',
+}
+
+export enum FuelType {
+  PETROL = 'PETROL',
+  DIESEL = 'DIESEL',
+}
+
+export enum PaymentGatewayType {
+  PAYSTACK = 'PAYSTACK',
+  FLUTTERWAVE = 'FLUTTERWAVE',
+  MANUAL = 'MANUAL',
+}

@@ -1,0 +1,3 @@
+# Root docker-compose pointing to the development services
+include:
+  - infrastructure/docker-compose.yml

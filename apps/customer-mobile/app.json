@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "RoadAid Customer",
+    "slug": "roadaid-customer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B132B"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "co.roadaid.customer",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "RoadAid requires your location to send roadside assistance to your precise breakdown point."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B132B"
+      },
+      "package": "co.roadaid.customer",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    }
+  }
+}
