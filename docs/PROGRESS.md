@@ -315,3 +315,18 @@ Phase 3 dispatch is now authorized.
 - Provider Expo Doctor: PASS (20/20).
 - API 43/43 tests, admin/provider/customer lint and typecheck: PASS.
 - Expo authentication check: `Not logged in`; EAS project initialization and APK creation require the project owner's Expo login.
+
+### Slice 5 — Automated gate hardening — 14 Nov 2026
+
+- Prisma client regenerated successfully after the Phase 3 dispatch-round migration.
+- Added automated expiry recovery, provider-cancellation recovery and admin re-dispatch round tests.
+- Added Socket.IO request-room tests proving customer ownership enforcement, cross-customer denial and admin access.
+- API suite now passes 49/49 tests across 10 suites.
+- Live 50-request/20-provider concurrency harness rerun: 20 pending offers, 20 unique providers, zero duplicate-provider offers and zero duplicate-request offers.
+- PostgreSQL catalog verification confirms all mandatory partial unique indexes:
+  - `uq_provider_one_active_request`
+  - `uq_provider_one_pending_offer`
+  - `uq_request_one_pending_offer`
+- PostGIS and Redis containers were restarted for live verification and remain available.
+
+**Remaining Phase 3 acceptance evidence:** Expo account login/project initialization, provider development APK, background push on a locked phone, and the physical customer + two-provider sequential fallback journey.

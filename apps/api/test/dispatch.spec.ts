@@ -5,6 +5,7 @@ import { DispatchService } from '../src/dispatch/dispatch.service';
 describe('DispatchService offer responses', () => {
   const tx: any = {
     $queryRaw: jest.fn(),
+    $executeRaw: jest.fn(),
     dispatchOffer: { update: jest.fn() },
     providerProfile: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     serviceRequest: { update: jest.fn() },
@@ -61,5 +62,29 @@ describe('DispatchService offer responses', () => {
     const result = await service.respond('provider-1', 'offer-1', false, 'Too far');
     expect(result.accepted).toBe(false);
     expect(tx.providerProfile.updateMany).toHaveBeenCalledWith({ where: { userId: 'provider-1', availability: ProviderAvailability.RESERVED }, data: { availability: ProviderAvailability.ONLINE } });
+  });
+
+  it('expires a pending offer and releases its reservation', async () => {
+    tx.$queryRaw.mockResolvedValueOnce([{ id: 'offer-1', request_id: 'request-1', provider_id: 'provider-1', status: OfferStatus.PENDING }]);
+    tx.serviceRequest.update.mockResolvedValue({ offersMadeCount: 1 });
+    await service.expireOffer('offer-1');
+    expect(tx.dispatchOffer.update).toHaveBeenCalledWith({ where: { id: 'offer-1' }, data: { status: OfferStatus.EXPIRED, respondedAt: expect.any(Date) } });
+    expect(tx.providerProfile.updateMany).toHaveBeenCalledWith({ where: { userId: 'provider-1', availability: ProviderAvailability.RESERVED }, data: { availability: ProviderAvailability.ONLINE } });
+    expect(realtime.emitOfferExpired).toHaveBeenCalledWith('provider-1', 'offer-1');
+  });
+
+  it('returns a provider-cancelled active job to searching', async () => {
+    tx.$queryRaw.mockResolvedValueOnce([{ status: RequestStatus.EN_ROUTE, provider_id: 'provider-1', offers_made_count: 2 }]);
+    const result = await service.cancelAcceptedJob('provider-1', 'request-1', 'Vehicle issue');
+    expect(result.status).toBe(RequestStatus.SEARCHING);
+    expect(tx.providerProfile.updateMany).toHaveBeenCalledWith({ where: { userId: 'provider-1', currentRequestId: 'request-1' }, data: { currentRequestId: null, availability: ProviderAvailability.ONLINE } });
+    expect(tx.requestEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'CANCELLED', actorType: 'PROVIDER' }) }));
+  });
+
+  it('increments the dispatch round when an admin re-dispatches', async () => {
+    tx.$queryRaw.mockResolvedValueOnce([{ status: RequestStatus.ESCALATED, dispatch_round: 1 }]);
+    const result = await service.redispatch('request-1', 'admin-1');
+    expect(result).toMatchObject({ status: RequestStatus.SEARCHING, dispatchRound: 2 });
+    expect(tx.requestEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'ADMIN_ACTION', payload: { action: 'REDISPATCH', round: 2 } }) }));
   });
 });
