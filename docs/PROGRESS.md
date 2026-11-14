@@ -193,7 +193,7 @@ The user confirmed the complete physical provider/admin journey, including per-s
 
 ## Phase 2: Requests and Pricing
 
-**Status:** Implementation complete / acceptance gate pending physical customer UI confirmation
+**Status:** Gate passed on physical device and admin dashboard
 **Started:** 14 Nov 2026
 
 ### Backend slices completed
@@ -224,7 +224,94 @@ The user confirmed the complete physical provider/admin journey, including per-s
   - LOCKOUT quote and locked price: 800,000 kobo (`RA-20261114-8985F2`).
   - All three were stored as `REQUESTED` with matching quote and locked prices.
 
-### Remaining gate evidence
+### Acceptance Gate Evidence — Passed 14 Nov 2026
 
-- On the physical customer phone, create or inspect each service request and confirm the locked prices and history display.
-- In the admin dashboard, confirm all three requests and their `CREATED` timeline events are visible.
+- Physical customer flow produced FUEL, TOWING and LOCKOUT requests with locked prices.
+- Admin dashboard screenshot confirmed all three service types in the request queue with their locked prices and `REQUESTED` status.
+- Selected request displayed its append-only `CREATED · CUSTOMER` event in the Lagos-time timeline.
+- Pricing controls displayed the active integer-kobo rules for all three services.
+
+Phase 3 dispatch is now authorized.
+
+---
+
+## Phase 3: Dispatch
+
+**Status:** In progress
+**Started:** 14 Nov 2026
+
+### Slice 1 — Location and transactional offers
+
+- Provider location endpoint validates device timestamps and upserts the latest PostGIS geography point with server receipt time.
+- Location history is written only while a provider has an active request.
+- New customer requests transition from `REQUESTED` to `SEARCHING` and enqueue an idempotent BullMQ dispatch job.
+- Candidate selection enforces approved provider/service/account, online state, no active request, fresh location, radius, prior-offer exclusion and `FOR UPDATE OF pp SKIP LOCKED`.
+- ETA falls back to distance at approximately 30 km/h and uses deterministic distance/workload tie-breaking.
+- Only one provider is reserved; the database partial indexes remain the last defense against conflicting offers and assignments.
+- Delayed expiry jobs, a 15-second sweeper, orphaned reservation recovery and stalled-search recovery are active.
+- Provider accept and decline paths use row locks; acceptance atomically sets the request `ASSIGNED` and provider `BUSY/current_request_id`.
+- Provider phone can publish GPS, go online, poll/resync pending offers every five seconds and accept or decline.
+
+### Verification so far
+
+- API and provider mobile typecheck: PASS.
+- Existing API regression suite: PASS (33/33).
+
+### Slice 1 remaining-work snapshot
+
+- Provider job status progression and customer/provider cancellation recovery.
+- Customer searching/assigned UI, realtime resync and provider contact details.
+- Push notification delivery and background offer handling.
+- Admin escalation, re-dispatch, manual assignment and cancellation controls.
+- Dispatch settings editor and full sweeper/offline behavior.
+- Mandatory dispatch authorization, expiry, fallback and 50-request/20-provider concurrency tests.
+
+### Slice 2 — Lifecycle, intervention and concurrency — 14 Nov 2026
+
+- Central request state service now owns provider job progression and releases the provider atomically on completion or cancellation.
+- Customer cancellation cancels pending offers, releases reserved/assigned providers and is blocked after arrival as specified.
+- Provider app now resyncs the active job and exposes `EN_ROUTE`, `ARRIVED`, `IN_PROGRESS` and `COMPLETED` progression controls.
+- Customer app polls live request status, shows assigned provider name/phone and permits cancellation only during allowed states.
+- Added dispatch rounds through migration `20261114090000_phase3_dispatch_round`; admin re-dispatch increments the round so previously declined providers can be reconsidered without violating offer uniqueness.
+- Admin APIs and dashboard controls now support re-dispatch, eligible-provider discovery, atomic manual assignment and cancellation.
+- State-machine/cancellation regression suite added; API suite passes 38/38.
+- Added and executed the isolated live 50-request/20-provider concurrency harness with scoped cleanup.
+- The first concurrency run exposed premature escalation when all eligible rows were briefly `SKIP LOCKED`; candidate selection now retries when eligible providers remain visible but locked.
+- Final live result: 50 requests, 20 providers, 20 pending offers, 20 unique pending providers, zero duplicate-provider offers and zero duplicate-request offers.
+
+### Remaining Phase 3 work
+
+- Push notification delivery/background handling and customer socket integration.
+- Provider cancellation-after-acceptance recovery and offline/stale-provider sweeper behavior.
+- Admin dispatch settings editor and stronger manual-assignment UX.
+- Complete offer expiry, authorization, IDOR, decline-fallback and assignment-race automated suites.
+- Two-phone physical dispatch acceptance gate.
+
+### Slice 3 — Recovery, notifications and offer security — 14 Nov 2026
+
+- Provider cancellation after acceptance returns the request to `SEARCHING`, releases the provider and excludes them through the existing accepted offer in the current dispatch round.
+- The sweeper now moves idle providers with locations older than 15 minutes to `OFFLINE`.
+- Provider job routes now match the contract at `/provider/jobs/current`, `/:id/status` and `/:id/cancel`.
+- Notifications persist in the database, emit over Socket.IO and attempt high-priority Expo delivery without affecting dispatch correctness when delivery fails.
+- Provider EAS builds register an Android MAX-importance `offers` channel and push token when `EXPO_PUBLIC_EAS_PROJECT_ID` is configured; Expo Go retains five-second polling fallback.
+- Added validated, audited admin dispatch-settings APIs for offer timeout, radius, maximum offers, shortlist size, location staleness and maximum search duration.
+- Added offer ownership, expiry, accept and decline regression tests.
+- Full verification: workspace lint PASS, typecheck PASS, API tests 43/43, shared tests 4/4, API build PASS and admin production build PASS.
+
+### Gate blockers requiring device/account evidence
+
+- Configure an Expo/EAS project ID and create a provider development build; remote push/background behavior cannot be validated in Expo Go.
+- Run the two-provider-phone plus customer-phone fallback demo: first provider declines or times out, second provider accepts, customer sees assignment.
+
+### Slice 4 — Realtime, configuration and build readiness — 14 Nov 2026
+
+- Customer and provider apps now connect to Socket.IO for immediate resync while retaining five-second polling as the delivery-independent fallback.
+- Request-room joins now enforce customer/provider ownership or admin role, closing the realtime IDOR path.
+- Admin dashboard displays and edits validated dispatch timers, radius, maximum offers and freshness/search limits.
+- Expo push responses remove device tokens reported as `DeviceNotRegistered`.
+- Added `expo-dev-client`, the notifications config plugin and an internal Android APK development profile in `apps/provider-mobile/eas.json`.
+- Added `docs/DEVICE_TESTS.md` with the complete multi-phone dispatch, background, timeout, cancellation, escalation and recovery matrix.
+- Impeccable detector: PASS with no findings on the changed admin target.
+- Provider Expo Doctor: PASS (20/20).
+- API 43/43 tests, admin/provider/customer lint and typecheck: PASS.
+- Expo authentication check: `Not logged in`; EAS project initialization and APK creation require the project owner's Expo login.

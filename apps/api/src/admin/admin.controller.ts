@@ -26,6 +26,8 @@ import {
   ServiceType,
   pricingRuleSchema,
   PricingRuleDto,
+  dispatchSettingsSchema,
+  DispatchSettingsDto,
 } from '@roadaid/shared';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 
@@ -42,6 +44,16 @@ export class AdminController {
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   getPricing() { return this.adminService.getPricingRules(); }
 
+  @Get('dispatch-settings')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  getDispatchSettings() { return this.adminService.getDispatchSettings(); }
+
+  @Post('dispatch-settings/:serviceType')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  updateDispatchSettings(@Param('serviceType') serviceType: ServiceType, @Body(new ZodValidationPipe(dispatchSettingsSchema)) dto: DispatchSettingsDto, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) {
+    return this.adminService.updateDispatchSettings(serviceType, dto, admin.id, admin.adminRole || 'ADMIN', req.ip);
+  }
+
   @Post('pricing/:serviceType')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   updatePricing(@Param('serviceType') serviceType: ServiceType, @Body(new ZodValidationPipe(pricingRuleSchema)) dto: PricingRuleDto, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) {
@@ -55,6 +67,22 @@ export class AdminController {
   @Get('requests/:id')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   getRequest(@Param('id') id: string) { return this.adminService.getRequestDetail(id); }
+
+  @Post('requests/:id/redispatch')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  redispatchRequest(@Param('id') id: string, @CurrentUser() admin: AuthenticatedUser) { return this.adminService.redispatchRequest(id, admin.id); }
+
+  @Get('requests/:id/eligible-providers')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  eligibleProviders(@Param('id') id: string) { return this.adminService.eligibleProviders(id); }
+
+  @Post('requests/:id/assign')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  assignRequest(@Param('id') id: string, @Body('providerId') providerId: string, @CurrentUser() admin: AuthenticatedUser) { return this.adminService.manualAssign(id, providerId, admin.id); }
+
+  @Post('requests/:id/cancel')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  cancelRequest(@Param('id') id: string, @Body('reason') reason: string, @CurrentUser() admin: AuthenticatedUser) { return this.adminService.cancelRequest(id, reason || 'Cancelled by Operations', admin.id); }
 
   @Get('providers')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)

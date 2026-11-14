@@ -16,6 +16,7 @@ import {
   ProviderAvailability,
   DocumentType,
   Role,
+  LocationUpdateDto,
 } from '@roadaid/shared';
 
 @Injectable()
@@ -338,6 +339,38 @@ export class ProvidersService {
     this.realtimeGateway.emitProviderAvailability(providerId, state);
 
     return updated;
+  }
+
+  async updateLocation(providerId: string, dto: LocationUpdateDto) {
+    const profile = await this.prisma.providerProfile.findUnique({ where: { userId: providerId } });
+    if (!profile) throw new NotFoundException({ code: 'PROVIDER_PROFILE_NOT_FOUND', message: 'Provider profile not found' });
+    const recordedAt = new Date(dto.recordedAt);
+    const now = Date.now();
+    if (recordedAt.getTime() > now + 60_000 || recordedAt.getTime() < now - 24 * 60 * 60_000) {
+      throw new BadRequestException({ code: 'INVALID_LOCATION_TIME', message: 'Location timestamp is outside the accepted range' });
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO provider_locations
+          (provider_id, location, heading, speed_mps, accuracy_m, recorded_at, received_at, created_at, updated_at)
+        VALUES
+          (${providerId}::uuid, ST_SetSRID(ST_MakePoint(${dto.lng}, ${dto.lat}), 4326)::geography,
+           ${dto.heading ?? null}, ${dto.speed ?? null}, ${dto.accuracy}, ${recordedAt}, now(), now(), now())
+        ON CONFLICT (provider_id) DO UPDATE SET
+          location=EXCLUDED.location, heading=EXCLUDED.heading, speed_mps=EXCLUDED.speed_mps,
+          accuracy_m=EXCLUDED.accuracy_m, recorded_at=EXCLUDED.recorded_at, received_at=now(), updated_at=now()`;
+      if (profile.currentRequestId) {
+        await tx.$executeRaw`
+          INSERT INTO provider_location_history
+            (id, provider_id, request_id, location, accuracy_m, recorded_at, created_at)
+          VALUES
+            (gen_random_uuid(), ${providerId}::uuid, ${profile.currentRequestId}::uuid,
+             ST_SetSRID(ST_MakePoint(${dto.lng}, ${dto.lat}), 4326)::geography,
+             ${dto.accuracy}, ${recordedAt}, now())`;
+      }
+    });
+    if (profile.currentRequestId) this.realtimeGateway.emitProviderLocation(profile.currentRequestId, { providerId, ...dto, receivedAt: new Date().toISOString() });
+    return { success: true, receivedAt: new Date().toISOString() };
   }
 
   private async ensureProfileExists(userId: string) {

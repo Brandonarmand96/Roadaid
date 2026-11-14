@@ -24,6 +24,8 @@ import {
   ProviderAvailability,
   providerAvailabilitySchema,
   ProviderAvailabilityDto,
+  locationUpdateSchema,
+  LocationUpdateDto,
 } from '@roadaid/shared';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 
@@ -126,5 +128,14 @@ export class ProvidersController {
     @Body(new ZodValidationPipe(providerAvailabilitySchema)) dto: ProviderAvailabilityDto,
   ) {
     return this.providersService.setAvailability(userId, dto.state as ProviderAvailability);
+  }
+
+  @Post('location')
+  @HttpCode(HttpStatus.OK)
+  async updateLocation(
+    @CurrentUser('id') providerId: string,
+    @Body(new ZodValidationPipe(locationUpdateSchema)) dto: LocationUpdateDto,
+  ) {
+    return this.providersService.updateLocation(providerId, dto);
   }
 }

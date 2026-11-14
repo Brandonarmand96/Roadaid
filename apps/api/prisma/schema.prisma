@@ -379,6 +379,7 @@ model ServiceRequest {
   paymentMode               String        @default("ONLINE_AFTER_ACCEPT") @map("payment_mode") @db.VarChar(50)
   currentOfferId            String?       @map("current_offer_id") @db.Uuid
   offersMadeCount           Int           @default(0) @map("offers_made_count")
+  dispatchRound             Int           @default(1) @map("dispatch_round")
   etaSeconds                Int?          @map("eta_seconds")
   acceptedAt                DateTime?     @map("accepted_at") @db.Timestamptz
   arrivedAt                 DateTime?     @map("arrived_at") @db.Timestamptz

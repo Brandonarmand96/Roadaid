@@ -4,10 +4,12 @@ import { Prisma } from '@prisma/client';
 import { CreateServiceRequestDto, QuoteRequestDto } from '@roadaid/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
+import { DispatchService } from '../dispatch/dispatch.service';
+import { RequestStateService } from './request-state.service';
 
 @Injectable()
 export class RequestsService {
-  constructor(private readonly prisma: PrismaService, private readonly pricing: PricingService) {}
+  constructor(private readonly prisma: PrismaService, private readonly pricing: PricingService, private readonly dispatch: DispatchService, private readonly states: RequestStateService) {}
 
   async create(customerId: string, dto: CreateServiceRequestDto) {
     const [quote, commission, vehicle] = await Promise.all([
@@ -36,13 +38,15 @@ export class RequestsService {
            ${JSON.stringify(breakdown)}::jsonb, ${commission.commissionBps}, ${process.env.PAYMENT_MODE || 'ONLINE_AFTER_ACCEPT'}, now(), now(), now())`;
       await tx.requestEvent.create({ data: { requestId: id, type: 'CREATED', actorType: 'CUSTOMER', actorId: customerId, payload: { serviceType: dto.serviceType, priceKobo: quote.priceKobo.toString() } } });
     });
+    await this.dispatch.start(id);
     return this.getOwned(customerId, id);
   }
 
-  listOwned(customerId: string) { return this.prisma.serviceRequest.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' }, include: { events: { orderBy: { createdAt: 'asc' } } } }); }
+  listOwned(customerId: string) { return this.prisma.serviceRequest.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' }, include: { provider: { select: { fullName: true, phone: true } }, events: { orderBy: { createdAt: 'asc' } } } }); }
   async getOwned(customerId: string, id: string) {
-    const request = await this.prisma.serviceRequest.findFirst({ where: { id, customerId }, include: { events: { orderBy: { createdAt: 'asc' } } } });
+    const request = await this.prisma.serviceRequest.findFirst({ where: { id, customerId }, include: { provider: { select: { fullName: true, phone: true } }, events: { orderBy: { createdAt: 'asc' } } } });
     if (!request) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
     return request;
   }
+  cancelOwned(customerId: string, id: string, reason: string) { return this.states.cancel(id, { type: 'CUSTOMER', id: customerId }, reason); }
 }

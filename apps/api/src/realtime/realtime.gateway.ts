@@ -10,6 +10,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import * as jwt from 'jsonwebtoken';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface JwtPayload {
   userId: string;
@@ -27,6 +28,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   server!: Server;
 
   private readonly logger = new Logger(RealtimeGateway.name);
+  constructor(private readonly prisma: PrismaService) {}
 
   handleConnection(client: Socket) {
     try {
@@ -61,8 +63,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage('join:request')
-  handleJoinRequest(@ConnectedSocket() client: Socket, @MessageBody() data: { requestId: string }) {
-    if (data?.requestId) {
+  async handleJoinRequest(@ConnectedSocket() client: Socket, @MessageBody() data: { requestId: string }) {
+    const user = client.data.user as JwtPayload | undefined;
+    if (data?.requestId && user) {
+      const allowed = user.role === 'ADMIN' || Boolean(await this.prisma.serviceRequest.findFirst({ where: { id: data.requestId, ...(user.role === 'CUSTOMER' ? { customerId: user.userId } : { providerId: user.userId }) }, select: { id: true } }));
+      if (!allowed) return { success: false, error: 'Forbidden request room' };
       client.join(`request:${data.requestId}`);
       this.logger.debug(`Socket ${client.id} joined room request:${data.requestId}`);
       return { success: true, room: `request:${data.requestId}` };
@@ -111,5 +116,9 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   emitProviderAvailability(providerId: string, state: string) {
     this.server.to('admin').emit('provider.availability', { providerId, state });
+  }
+
+  emitNotification(userId: string, payload: unknown) {
+    this.server.to(`user:${userId}`).emit('notification.new', payload);
   }
 }

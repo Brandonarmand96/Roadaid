@@ -101,6 +101,15 @@ export const pricingRuleSchema = z.object({
   active: z.boolean(),
 });
 
+export const dispatchSettingsSchema = z.object({
+  offerTimeoutSeconds: z.number().int().min(10).max(300),
+  searchRadiusKm: z.number().positive().max(100),
+  maxOffers: z.number().int().min(1).max(20),
+  candidateShortlistSize: z.number().int().min(1).max(20),
+  staleLocationSeconds: z.number().int().min(30).max(900),
+  maxSearchDurationSeconds: z.number().int().min(60).max(3600),
+});
+
 export const locationUpdateSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
@@ -166,6 +175,7 @@ export type LockoutDetailsDto = z.infer<typeof lockoutDetailsSchema>;
 export type QuoteRequestDto = z.infer<typeof quoteRequestSchema>;
 export type CreateServiceRequestDto = z.infer<typeof createServiceRequestSchema>;
 export type PricingRuleDto = z.infer<typeof pricingRuleSchema>;
+export type DispatchSettingsDto = z.infer<typeof dispatchSettingsSchema>;
 export type LocationUpdateDto = z.infer<typeof locationUpdateSchema>;
 export type LocationBatchDto = z.infer<typeof locationBatchSchema>;
 export type ProviderAvailabilityDto = z.infer<typeof providerAvailabilitySchema>;

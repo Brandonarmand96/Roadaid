@@ -13,7 +13,9 @@ import {
   ServiceType,
   ProviderAvailability,
 } from '@roadaid/shared';
-import { PricingRuleDto } from '@roadaid/shared';
+import { DispatchSettingsDto, PricingRuleDto } from '@roadaid/shared';
+import { DispatchService } from '../dispatch/dispatch.service';
+import { RequestStateService } from '../requests/request-state.service';
 
 @Injectable()
 export class AdminService {
@@ -21,6 +23,8 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     @Inject('STORAGE_SERVICE') private readonly storage: StorageService,
+    private readonly dispatch: DispatchService,
+    private readonly states: RequestStateService,
   ) {}
 
   async getProviders(filters: { status?: OnboardingStatus; service?: ServiceType; q?: string }) {
@@ -63,6 +67,16 @@ export class AdminService {
     return this.prisma.pricingRule.findMany({ orderBy: { serviceType: 'asc' } });
   }
 
+  getDispatchSettings() { return this.prisma.dispatchSettings.findMany({ orderBy: { serviceType: 'asc' } }); }
+
+  async updateDispatchSettings(serviceType: ServiceType, dto: DispatchSettingsDto, adminId: string, adminRole: string, ip?: string) {
+    const before = await this.prisma.dispatchSettings.findUnique({ where: { serviceType } });
+    if (!before) throw new NotFoundException({ code: 'DISPATCH_SETTINGS_NOT_FOUND', message: 'Dispatch settings not found' });
+    const after = await this.prisma.dispatchSettings.update({ where: { serviceType }, data: { ...dto, updatedBy: adminId } });
+    await this.auditService.log({ actorId: adminId, actorRole: adminRole, action: 'DISPATCH_SETTINGS_UPDATED', entityType: 'DISPATCH_SETTINGS', entityId: after.id, before, after, ip });
+    return after;
+  }
+
   async updatePricingRule(serviceType: ServiceType, dto: PricingRuleDto, adminId: string, adminRole: string, ip?: string) {
     const before = await this.prisma.pricingRule.findUnique({ where: { serviceType } });
     if (!before) throw new NotFoundException({ code: 'PRICING_RULE_NOT_FOUND', message: 'Pricing rule not found' });
@@ -87,6 +101,11 @@ export class AdminService {
     if (!request) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
     return request;
   }
+
+  redispatchRequest(id: string, adminId: string) { return this.dispatch.redispatch(id, adminId); }
+  eligibleProviders(id: string) { return this.dispatch.eligibleProviders(id); }
+  manualAssign(id: string, providerId: string, adminId: string) { return this.dispatch.manualAssign(id, providerId, adminId); }
+  cancelRequest(id: string, reason: string, adminId: string) { return this.states.cancel(id, { type: 'ADMIN', id: adminId }, reason); }
 
   async getProviderDetail(providerId: string) {
     const provider = await this.prisma.providerProfile.findUnique({

@@ -1,0 +1,2 @@
+ALTER TABLE service_requests
+  ADD COLUMN IF NOT EXISTS dispatch_round INTEGER NOT NULL DEFAULT 1;
