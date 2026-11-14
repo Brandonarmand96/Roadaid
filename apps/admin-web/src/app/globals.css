@@ -10,11 +10,15 @@
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  background: rgb(var(--background-start-rgb));
   min-height: 100vh;
+}
+
+::selection {
+  background: #f4b942;
+  color: #101827;
+}
+
+button, input, a {
+  caret-color: #d48428;
 }

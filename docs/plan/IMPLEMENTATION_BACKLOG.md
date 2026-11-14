@@ -4,29 +4,29 @@ Tracking implementation phases against SPEC.md and Implementation Blueprint.
 
 ## Epic 0: Foundation & Bootstrap (Phase 0) — Target: 9–11 Nov
 - [x] **TASK-001**: Repository inspection, git initialization, agent instruction files (`SPEC.md`, `AGENTS.md`, `CLAUDE.md`).
-- [ ] **TASK-002**: Monorepo root setup (`pnpm-workspace.yaml`, root `package.json`, `turbo.json`, `tsconfig.json`).
-- [ ] **TASK-003**: Shared contracts package (`packages/shared` with Zod schemas, domain enums, DTOs, constants).
-- [ ] **TASK-004**: Infrastructure setup (`docker-compose.yml` with Postgres 16 + PostGIS and Redis 7, `.env.example`).
-- [ ] **TASK-005**: API module structure (`apps/api` NestJS modular monolith with typed config, Prisma schema, hand-written SQL migration for PostGIS & partial unique indexes).
-- [ ] **TASK-006**: Seed script (`infrastructure/scripts/seed.ts` or `apps/api/prisma/seed.ts`) with default admin, pricing rules, dispatch settings, commission settings.
-- [ ] **TASK-007**: Realtime Gateway skeleton (`RealtimeModule` with Socket.IO, auth handshake, room management).
-- [ ] **TASK-008**: Frontend shells (`apps/admin-web` Next.js, `apps/customer-mobile` Expo, `apps/provider-mobile` Expo).
-- [ ] **TASK-009**: Health & readiness endpoints (`GET /v1/health`, `GET /v1/ready`) + CI workflow (`.github/workflows/ci.yml`).
+- [x] **TASK-002**: Monorepo root setup (`pnpm-workspace.yaml`, root `package.json`, `turbo.json`, `tsconfig.json`).
+- [x] **TASK-003**: Shared contracts package (`packages/shared` with Zod schemas, domain enums, DTOs, constants).
+- [x] **TASK-004**: Infrastructure setup (`docker-compose.yml` with Postgres 16 + PostGIS and Redis 7, `.env.example`).
+- [x] **TASK-005**: API module structure (`apps/api` NestJS modular monolith with typed config, Prisma schema, hand-written SQL migration for PostGIS & partial unique indexes).
+- [x] **TASK-006**: Seed script (`infrastructure/scripts/seed.ts` or `apps/api/prisma/seed.ts`) with default admin, pricing rules, dispatch settings, commission settings.
+- [x] **TASK-007**: Realtime Gateway skeleton (`RealtimeModule` with Socket.IO, auth handshake, room management).
+- [x] **TASK-008**: Frontend shells (`apps/admin-web` Next.js, `apps/customer-mobile` Expo, `apps/provider-mobile` Expo).
+- [x] **TASK-009**: Health & readiness endpoints (`GET /v1/health`, `GET /v1/ready`) + CI workflow (`.github/workflows/ci.yml`).
 
 ## Epic 1: Identity, Onboarding & Approvals (Phase 1) — Target: 12–15 Nov
-- **TASK-101**: Auth module (OTP request, verify with dev fixed code / console SMS / Termii, refresh tokens, Argon2 admin login).
-- **TASK-102**: User profile & customer vehicles API + RBAC & ownership guards.
-- **TASK-103**: Provider profile, service registration, document upload (S3 / local storage adapter), review submission.
-- **TASK-104**: Admin provider approval workflow (per-service approve/reject, document inspection via signed URLs).
-- **TASK-105**: Audit logging on all admin mutations.
-- **TASK-106**: RBAC, IDOR, and OTP security test suite.
+- [x] **TASK-101**: Auth module (OTP request, verify with dev fixed code / console SMS / Termii, refresh tokens, Argon2 admin login).
+- [x] **TASK-102**: User profile & customer vehicles API + RBAC & ownership guards.
+- [x] **TASK-103**: Provider profile, service registration, document upload (S3 / local storage adapter), review submission.
+- [x] **TASK-104**: Admin provider approval workflow (per-service approve/reject, document inspection via signed URLs).
+- [x] **TASK-105**: Audit logging on all admin mutations.
+- [x] **TASK-106**: RBAC, IDOR, and OTP security test suite.
 
 ## Epic 2: Requests & Pricing (Phase 2) — Target: 16–18 Nov
-- **TASK-201**: Pricing rules engine (`PricingService.quote` for FUEL, TOWING, LOCKOUT with kobo integer arithmetic).
-- **TASK-202**: Service request creation and server-side price lock (`service_requests.price_kobo`).
-- **TASK-203**: Request state machine (`RequestStateService.transition` with transactional event logging).
-- **TASK-204**: Customer request flows across all 3 services + history.
-- **TASK-205**: Admin request queue, detail view, and event timeline.
+- [x] **TASK-201**: Pricing rules engine (`PricingService.quote` for FUEL, TOWING, LOCKOUT with kobo integer arithmetic).
+- [x] **TASK-202**: Service request creation and server-side price lock (`service_requests.price_kobo`).
+- [x] **TASK-203**: Request state machine (`RequestStateService.transition` with transactional event logging).
+- [x] **TASK-204**: Customer request flows across all 3 services + history.
+- [x] **TASK-205**: Admin request queue, detail view, and event timeline.
 
 ## Epic 3: Dispatch Engine & Concurrency (Phase 3) — Target: 19–23 Nov
 - **TASK-301**: Provider availability & location ingestion (`POST /v1/provider/location`, batching, freshness checks).

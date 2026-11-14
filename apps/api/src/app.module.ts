@@ -2,12 +2,28 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { AuthModule } from './auth/auth.module';
+import { CustomersModule } from './customers/customers.module';
+import { StorageModule } from './storage/storage.module';
+import { ProvidersModule } from './providers/providers.module';
+import { AuditModule } from './audit/audit.module';
+import { AdminModule } from './admin/admin.module';
+import { PricingModule } from './pricing/pricing.module';
+import { RequestsModule } from './requests/requests.module';
 
 @Module({
   imports: [
     PrismaModule,
     HealthModule,
     RealtimeModule,
+    AuthModule,
+    CustomersModule,
+    StorageModule,
+    ProvidersModule,
+    AuditModule,
+    AdminModule,
+    PricingModule,
+    RequestsModule,
   ],
 })
 export class AppModule {}

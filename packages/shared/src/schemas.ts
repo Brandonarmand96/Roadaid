@@ -1,14 +1,5 @@
 import { z } from 'zod';
-import {
-  Role,
-  AdminRole,
-  ServiceType,
-  VehicleType,
-  DocumentType,
-  LockType,
-  FuelType,
-  ProviderAvailability,
-} from './enums';
+import { ServiceType, VehicleType, LockType, FuelType, ProviderAvailability } from './enums';
 
 // Phone schema: E.164 format (+234...)
 export const phoneSchema = z
@@ -72,6 +63,13 @@ export const quoteRequestSchema = z.object({
   serviceType: z.nativeEnum(ServiceType),
   pickup: coordinatesSchema,
   details: z.union([fuelDetailsSchema, towingDetailsSchema, lockoutDetailsSchema]),
+}).superRefine((value, ctx) => {
+  const valid = value.serviceType === ServiceType.FUEL
+    ? fuelDetailsSchema.safeParse(value.details).success
+    : value.serviceType === ServiceType.TOWING
+      ? towingDetailsSchema.safeParse(value.details).success
+      : lockoutDetailsSchema.safeParse(value.details).success;
+  if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['details'], message: `Details do not match ${value.serviceType}` });
 });
 
 export const createServiceRequestSchema = z.object({
@@ -84,7 +82,23 @@ export const createServiceRequestSchema = z.object({
   }),
   vehicleId: z.string().uuid().optional(),
   details: z.union([fuelDetailsSchema, towingDetailsSchema, lockoutDetailsSchema]),
-  quotePriceKobo: z.number().int().nonnegative(),
+  quotePriceKobo: z.number().int().nonnegative().optional(),
+}).superRefine((value, ctx) => {
+  const valid = value.serviceType === ServiceType.FUEL
+    ? fuelDetailsSchema.safeParse(value.details).success
+    : value.serviceType === ServiceType.TOWING
+      ? towingDetailsSchema.safeParse(value.details).success
+      : lockoutDetailsSchema.safeParse(value.details).success;
+  if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['details'], message: `Details do not match ${value.serviceType}` });
+});
+
+export const pricingRuleSchema = z.object({
+  baseKobo: z.number().int().nonnegative(),
+  perKmKobo: z.number().int().nonnegative(),
+  perLitreKobo: z.number().int().nonnegative(),
+  minKobo: z.number().int().nonnegative(),
+  towingFreeKm: z.number().nonnegative(),
+  active: z.boolean(),
 });
 
 export const locationUpdateSchema = z.object({
@@ -151,6 +165,7 @@ export type TowingDetailsDto = z.infer<typeof towingDetailsSchema>;
 export type LockoutDetailsDto = z.infer<typeof lockoutDetailsSchema>;
 export type QuoteRequestDto = z.infer<typeof quoteRequestSchema>;
 export type CreateServiceRequestDto = z.infer<typeof createServiceRequestSchema>;
+export type PricingRuleDto = z.infer<typeof pricingRuleSchema>;
 export type LocationUpdateDto = z.infer<typeof locationUpdateSchema>;
 export type LocationBatchDto = z.infer<typeof locationBatchSchema>;
 export type ProviderAvailabilityDto = z.infer<typeof providerAvailabilitySchema>;

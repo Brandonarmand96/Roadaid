@@ -6,6 +6,7 @@ import * as dotenv from 'dotenv';
 import { AppModule } from './app.module';
 import { validateEnv } from './config/env.config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { jsonBigIntReplacer } from './common/utils/json-bigint';
 
 dotenv.config();
 
@@ -19,6 +20,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     cors: true,
   });
+
+  // Prisma returns PostgreSQL BIGINT columns as bigint. JSON has no bigint
+  // primitive, while the public API contract requires exact integer kobo.
+  app.getHttpAdapter().getInstance().set('json replacer', jsonBigIntReplacer);
 
   // Security headers
   app.use(helmet());

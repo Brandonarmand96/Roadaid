@@ -1,62 +1,53 @@
-import React from 'react';
-import { StyleSheet, Text, View, SafeAreaView, StatusBar } from 'react-native';
-import { APP_NAME, APP_TAGLINE } from '@roadaid/shared';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Location from 'expo-location';
+import * as SecureStore from 'expo-secure-store';
+import { FuelType, LockType, ServiceType } from '@roadaid/shared';
 
-export default function App() {
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0B132B" />
-      <View style={styles.content}>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>CUSTOMER APP</Text>
-        </View>
-        <Text style={styles.title}>{APP_NAME}</Text>
-        <Text style={styles.subtitle}>{APP_TAGLINE}</Text>
-        <Text style={styles.meta}>Abuja Roadside Assistance</Text>
-      </View>
-    </SafeAreaView>
-  );
+declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
+const rawApi = (process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:3000').replace(/\/+$/, '');
+const API = rawApi.endsWith('/v1') ? rawApi : `${rawApi}/v1`;
+const TOKEN_KEY = 'customer-access-token';
+type Screen = 'phone' | 'otp' | 'home' | 'details' | 'quote' | 'history';
+type Quote = { priceKobo: number; breakdown: { baseKobo: number; variableKobo: number } };
+type RoadRequest = { id: string; code: string; serviceType: string; status: string; pickupAddress: string; priceKobo: number };
+
+async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+  const response = await fetch(`${API}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.message ?? 'Could not reach RoadAid. Check your connection and try again.');
+  return body as T;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0B132B',
-  },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  badge: {
-    backgroundColor: '#F4D35E',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
-  badgeText: {
-    color: '#0B132B',
-    fontWeight: '700',
-    fontSize: 12,
-    letterSpacing: 1,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#F4D35E',
-    letterSpacing: 1.5,
-    marginBottom: 16,
-  },
-  meta: {
-    fontSize: 14,
-    color: '#94A3B8',
-  },
-});
+export default function App() {
+  const [screen, setScreen] = useState<Screen>('phone'); const [token, setToken] = useState(''); const [phone, setPhone] = useState('+234'); const [code, setCode] = useState('');
+  const [service, setService] = useState<ServiceType>(); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [quote, setQuote] = useState<Quote>(); const [history, setHistory] = useState<RoadRequest[]>([]);
+  const [pickup, setPickup] = useState({ lat: 9.0765, lng: 7.3986, address: '', note: '' }); const [fuel, setFuel] = useState({ fuelType: FuelType.PETROL, litres: '5' });
+  const [tow, setTow] = useState({ address: '', vehicleCondition: '', lat: '9.0765', lng: '7.3986' }); const [lockType, setLockType] = useState<LockType>(LockType.KEYS_INSIDE); const [notes, setNotes] = useState('');
+  useEffect(() => { SecureStore.getItemAsync(TOKEN_KEY).then((saved) => { if (saved) { setToken(saved); setScreen('home'); } }); }, []);
+  async function act(fn: () => Promise<void>) { setBusy(true); setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : 'Unexpected error'); } finally { setBusy(false); } }
+  function details() { if (service === ServiceType.FUEL) return { fuelType: fuel.fuelType, litres: Number(fuel.litres) }; if (service === ServiceType.TOWING) return { destination: { lat: Number(tow.lat), lng: Number(tow.lng), address: tow.address }, vehicleCondition: tow.vehicleCondition }; return { lockType, notes }; }
+  async function locate() { await act(async () => { const permission = await Location.requestForegroundPermissionsAsync(); if (!permission.granted) throw new Error('Location permission is required. Enable it in phone settings.'); const point = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }); setPickup((p) => ({ ...p, lat: point.coords.latitude, lng: point.coords.longitude })); }); }
+  async function getQuote() { if (!service || !pickup.address.trim()) return setError('Enter a clear pickup address.'); await act(async () => { setQuote(await request('/pricing/quote', { method: 'POST', body: JSON.stringify({ serviceType: service, pickup: { lat: pickup.lat, lng: pickup.lng }, details: details() }) }, token)); setScreen('quote'); }); }
+  async function loadHistory() { await act(async () => { setHistory(await request('/requests', {}, token)); setScreen('history'); }); }
+  async function create() { if (!service) return; await act(async () => { await request('/requests', { method: 'POST', body: JSON.stringify({ serviceType: service, pickup, details: details() }) }, token); await loadHistory(); }); }
+  return <SafeAreaView style={s.safe}><StatusBar barStyle="light-content" /><Header onPress={token ? () => setScreen('home') : undefined} /><ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">{error ? <Notice title="We could not continue" body={error} warning /> : null}
+    {screen === 'phone' && <Section title="Help starts with your number" intro="Sign in securely to request verified roadside assistance in Abuja."><Field label="Mobile number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" /><Button label="Send secure code" busy={busy} onPress={() => act(async () => { await request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone }) }); setScreen('otp'); })} /></Section>}
+    {screen === 'otp' && <Section title="Enter your secure code" intro={`We sent six digits to ${phone}.`}><Field label="Verification code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6} /><Button label="Verify and continue" busy={busy} disabled={code.length !== 6} onPress={() => act(async () => { const auth = await request<{ accessToken: string }>('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ phone, code }) }); await SecureStore.setItemAsync(TOKEN_KEY, auth.accessToken); setToken(auth.accessToken); setScreen('home'); })} /></Section>}
+    {screen === 'home' && <Section title="What happened?" intro="Choose the assistance you need. You will review the exact price before sending the request."><Service label="Emergency fuel" detail="Petrol or diesel delivered to you" onPress={() => { setService(ServiceType.FUEL); setScreen('details'); }} /><Service label="Vehicle towing" detail="Recovery to a destination you choose" onPress={() => { setService(ServiceType.TOWING); setScreen('details'); }} /><Service label="Vehicle lockout" detail="Help with keys or a damaged lock" onPress={() => { setService(ServiceType.LOCKOUT); setScreen('details'); }} /><Link label="View request history" onPress={() => void loadHistory()} /></Section>}
+    {screen === 'details' && service && <Section title={service === ServiceType.FUEL ? 'Fuel delivery details' : service === ServiceType.TOWING ? 'Towing details' : 'Lockout details'} intro="Tell Operations exactly what the responder should prepare for.">{service === ServiceType.FUEL && <><Choices values={Object.values(FuelType)} value={fuel.fuelType} onChange={(v) => setFuel({ ...fuel, fuelType: v as FuelType })} /><Field label="Litres" value={fuel.litres} onChangeText={(litres) => setFuel({ ...fuel, litres })} keyboardType="number-pad" /></>}{service === ServiceType.TOWING && <><Field label="Destination address" value={tow.address} onChangeText={(address) => setTow({ ...tow, address })} /><Field label="Vehicle condition" value={tow.vehicleCondition} onChangeText={(vehicleCondition) => setTow({ ...tow, vehicleCondition })} /></>}{service === ServiceType.LOCKOUT && <><Choices values={Object.values(LockType)} value={lockType} onChange={(v) => setLockType(v as LockType)} /><Field label="Notes (optional)" value={notes} onChangeText={setNotes} /></>}<View style={s.rule} /><Field label="Pickup address" value={pickup.address} onChangeText={(address) => setPickup({ ...pickup, address })} placeholder="Street, landmark, district" /><Field label="Pickup note (optional)" value={pickup.note} onChangeText={(note) => setPickup({ ...pickup, note })} /><Link label="Use my current GPS location" onPress={() => void locate()} /><Button label="Calculate exact price" busy={busy} onPress={() => void getQuote()} /><Link label="Choose another service" onPress={() => setScreen('home')} /></Section>}
+    {screen === 'quote' && quote && service && <Section title="Review before requesting" intro="This price is calculated by RoadAid and will be locked when you confirm."><Summary label="Service" value={service} /><Summary label="Pickup" value={pickup.address} /><Summary label="Base" value={money(quote.breakdown.baseKobo)} /><Summary label="Service charge" value={money(quote.breakdown.variableKobo)} /><View style={s.total}><Text style={s.totalLabel}>Total</Text><Text style={s.totalValue}>{money(quote.priceKobo)}</Text></View><Button label="Request assistance" busy={busy} onPress={() => void create()} /><Link label="Change details" onPress={() => setScreen('details')} /></Section>}
+    {screen === 'history' && <Section title="Your requests" intro="These are the prices locked when each request was created.">{history.length === 0 ? <Notice title="No requests yet" body="Your first roadside request will appear here." /> : history.map((item) => <View key={item.id} style={s.history}><View style={s.between}><Text style={s.historyCode}>{item.code}</Text><Text style={s.status}>{item.status}</Text></View><Text style={s.historyService}>{item.serviceType} · {money(item.priceKobo)}</Text><Text style={s.muted}>{item.pickupAddress}</Text></View>)}<Link label="Request another service" onPress={() => setScreen('home')} /></Section>}
+  </ScrollView></SafeAreaView>;
+}
+const money = (kobo: number) => `₦${Math.trunc(kobo / 100).toLocaleString('en-NG')}`;
+function Header({ onPress }: { onPress?: () => void }) { return <Pressable disabled={!onPress} onPress={onPress} style={s.header}><View style={s.logo}><Text style={s.logoText}>RA</Text></View><View><Text style={s.brand}>RoadAid</Text><Text style={s.tagline}>BUILT FOR CERTAINTY</Text></View></Pressable>; }
+function Section({ title, intro, children }: React.PropsWithChildren<{ title: string; intro: string }>) { return <View style={s.section}><Text style={s.title}>{title}</Text><Text style={s.intro}>{intro}</Text><View style={s.form}>{children}</View></View>; }
+function Field({ label, ...props }: React.ComponentProps<typeof TextInput> & { label: string }) { return <View style={s.field}><Text style={s.label}>{label}</Text><TextInput {...props} style={s.input} placeholderTextColor="#778196" /></View>; }
+function Button({ label, onPress, busy, disabled }: { label: string; onPress: () => void; busy?: boolean; disabled?: boolean }) { return <Pressable onPress={onPress} disabled={busy || disabled} style={[s.button, (busy || disabled) && s.disabled]}>{busy ? <ActivityIndicator color="#101827" /> : <Text style={s.buttonText}>{label}</Text>}</Pressable>; }
+function Link({ label, onPress }: { label: string; onPress: () => void }) { return <Pressable onPress={onPress} style={s.link}><Text style={s.linkText}>{label}</Text></Pressable>; }
+function Service({ label, detail, onPress }: { label: string; detail: string; onPress: () => void }) { return <Pressable onPress={onPress} style={s.service}><View><Text style={s.serviceTitle}>{label}</Text><Text style={s.muted}>{detail}</Text></View><Text style={s.arrow}>›</Text></Pressable>; }
+function Choices({ values, value, onChange }: { values: string[]; value: string; onChange: (v: string) => void }) { return <View style={s.choices}>{values.map((item) => <Pressable key={item} onPress={() => onChange(item)} style={[s.choice, item === value && s.choiceActive]}><Text style={[s.choiceText, item === value && s.choiceTextActive]}>{item.replaceAll('_', ' ')}</Text></Pressable>)}</View>; }
+function Summary({ label, value }: { label: string; value: string }) { return <View style={s.summary}><Text style={s.muted}>{label}</Text><Text style={s.summaryValue}>{value}</Text></View>; }
+function Notice({ title, body, warning }: { title: string; body: string; warning?: boolean }) { return <View style={[s.notice, warning && s.warning]}><Text style={s.noticeTitle}>{title}</Text><Text style={s.noticeBody}>{body}</Text></View>; }
+const s = StyleSheet.create({ safe: { flex: 1, backgroundColor: '#101827' }, header: { height: 76, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#293449' }, logo: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#F4B942', alignItems: 'center', justifyContent: 'center' }, logoText: { color: '#101827', fontWeight: '900' }, brand: { color: '#F8FAFC', fontSize: 18, fontWeight: '900' }, tagline: { color: '#F4B942', fontSize: 9, fontWeight: '900', letterSpacing: 1.4 }, page: { flexGrow: 1, backgroundColor: '#F5F1E8', padding: 20 }, section: { flex: 1, width: '100%', maxWidth: 620, alignSelf: 'center', justifyContent: 'center' }, title: { color: '#172033', fontSize: 31, lineHeight: 37, fontWeight: '900', letterSpacing: -0.7 }, intro: { color: '#566277', fontSize: 16, lineHeight: 23, marginTop: 10 }, form: { marginTop: 26, gap: 15 }, field: { gap: 7 }, label: { color: '#263247', fontSize: 13, fontWeight: '800' }, input: { minHeight: 52, borderWidth: 1, borderColor: '#C8C1B4', borderRadius: 14, paddingHorizontal: 15, color: '#172033', backgroundColor: '#FFFCF5', fontSize: 16 }, button: { minHeight: 54, backgroundColor: '#F4B942', borderRadius: 14, alignItems: 'center', justifyContent: 'center' }, disabled: { opacity: 0.45 }, buttonText: { color: '#101827', fontWeight: '900', fontSize: 15 }, link: { minHeight: 44, alignItems: 'center', justifyContent: 'center' }, linkText: { color: '#754713', fontWeight: '800' }, service: { minHeight: 76, borderBottomWidth: 1, borderBottomColor: '#D8D2C5', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 }, serviceTitle: { color: '#172033', fontWeight: '900', fontSize: 17 }, muted: { color: '#667185', fontSize: 12, lineHeight: 18 }, arrow: { color: '#9D5B13', fontSize: 32 }, choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, choice: { minHeight: 44, paddingHorizontal: 14, borderWidth: 1, borderColor: '#B8B1A5', borderRadius: 12, justifyContent: 'center', backgroundColor: '#FFFCF5' }, choiceActive: { backgroundColor: '#172033', borderColor: '#172033' }, choiceText: { color: '#384458', fontWeight: '800', fontSize: 12 }, choiceTextActive: { color: '#FFFFFF' }, rule: { height: 1, backgroundColor: '#D8D2C5' }, summary: { flexDirection: 'row', justifyContent: 'space-between', gap: 20, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#D8D2C5' }, summaryValue: { color: '#172033', fontWeight: '900', flex: 1, textAlign: 'right' }, total: { paddingVertical: 22, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }, totalLabel: { color: '#172033', fontSize: 18, fontWeight: '900' }, totalValue: { color: '#9D5B13', fontSize: 31, fontWeight: '900', fontVariant: ['tabular-nums'] }, notice: { backgroundColor: '#E5EDF3', borderRadius: 14, padding: 15 }, warning: { backgroundColor: '#FFEBC1', marginBottom: 18 }, noticeTitle: { color: '#172033', fontWeight: '900' }, noticeBody: { color: '#4F5C70', marginTop: 5, lineHeight: 19 }, history: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#D8D2C5' }, between: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 }, historyCode: { color: '#172033', fontWeight: '900' }, status: { color: '#754713', backgroundColor: '#FFE9B5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, fontSize: 10, fontWeight: '900' }, historyService: { color: '#172033', fontWeight: '800', marginTop: 8, marginBottom: 3 } });
