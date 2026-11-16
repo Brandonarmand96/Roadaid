@@ -1,4 +1,5 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { createHmac } from 'crypto';
 import { PaymentStatus, RequestStatus } from '@prisma/client';
 import { PaymentsService } from '../src/payments/payments.service';
 
@@ -15,7 +16,7 @@ describe('PaymentsService', () => {
   };
   const prisma: any = {
     payment: { findUnique: jest.fn(), update: jest.fn() },
-    webhookEvent: { create: jest.fn() },
+    webhookEvent: { create: jest.fn(), deleteMany: jest.fn() },
     $transaction: jest.fn((callback) => callback(tx)),
   };
   const gateway: any = { verify: jest.fn(), initialize: jest.fn() };
@@ -55,5 +56,15 @@ describe('PaymentsService', () => {
     await service.refund('request-1', 'admin-1', 'Customer approved refund', 'REF-1');
     expect(tx.ledgerEntry.create).toHaveBeenCalledWith({ data: expect.objectContaining({ type: 'REFUND', amountKobo: -10001n, createdBy: 'admin-1' }) });
     expect(tx.payment.update).toHaveBeenCalledWith({ where: { id: 'payment-1' }, data: expect.objectContaining({ status: 'REFUNDED' }) });
+  });
+
+  it('short-circuits a replayed webhook without verifying or writing the ledger twice', async () => {
+    process.env.PAYSTACK_WEBHOOK_SECRET = 'test-secret';
+    const raw = Buffer.from(JSON.stringify({ event: 'charge.success', data: { id: 44, reference: 'RA-PAY-1' } }));
+    const signature = createHmac('sha512', 'test-secret').update(raw).digest('hex');
+    prisma.webhookEvent.create.mockRejectedValue({ code: 'P2002' });
+    await expect(service.handlePaystack(raw, signature)).resolves.toEqual({ received: true, duplicate: true });
+    expect(gateway.verify).not.toHaveBeenCalled();
+    expect(tx.ledgerEntry.createMany).not.toHaveBeenCalled();
   });
 });

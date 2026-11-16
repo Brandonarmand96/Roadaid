@@ -10,12 +10,14 @@ import {
   TextInput,
   View,
   Platform,
+  Linking,
 } from "react-native";
 import { fetch as expoFetch } from "expo/fetch";
 import { File } from "expo-file-system";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
+import * as TaskManager from "expo-task-manager";
 import { OnboardingStatus, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
 
@@ -31,6 +33,11 @@ const ACCESS_TOKEN_KEY = "provider-access-token";
 const REFRESH_TOKEN_KEY = "provider-refresh-token";
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+const LOCATION_TASK = "roadaid-provider-location";
+const LOCATION_BUFFER_KEY = "provider-location-buffer";
+type LocationPoint = { lat: number; lng: number; accuracy: number; heading?: number; speed?: number; recordedAt: string };
+type Wallet = { balanceKobo: number; entries: Array<{ id: string; type: string; amountKobo: number; description: string; createdAt: string }> };
+type Payout = { id: string; amountKobo: number; status: string; requestedAt: string; paidReference?: string | null };
 type Step =
   "phone" | "otp" | "profile" | "services" | "documents" | "review" | "status";
 type Service = {
@@ -47,6 +54,7 @@ type Document = {
 };
 type Profile = {
   onboardingStatus: OnboardingStatus;
+  availability?: string;
   businessName?: string;
   address?: string;
   vehicleMake?: string;
@@ -80,6 +88,31 @@ type Job = {
 
 let currentSession: Session | undefined;
 let refreshInFlight: Promise<Session> | undefined;
+
+async function readLocationBuffer(): Promise<LocationPoint[]> {
+  try { return JSON.parse(await SecureStore.getItemAsync(LOCATION_BUFFER_KEY) || "[]") as LocationPoint[]; }
+  catch { return []; }
+}
+async function writeLocationBuffer(points: LocationPoint[]) { await SecureStore.setItemAsync(LOCATION_BUFFER_KEY, JSON.stringify(points.slice(-200))); }
+async function postLocationPoints(points: LocationPoint[], accessToken: string) {
+  const response = await fetch(`${API}/provider/location/batch`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ points }) });
+  if (!response.ok) throw new Error(`Location delivery failed (${response.status})`);
+}
+async function flushLocationBuffer(accessToken: string, additions: LocationPoint[] = []) {
+  const cutoff = Date.now() - 5 * 60_000;
+  const points = [...await readLocationBuffer(), ...additions].filter((point) => Date.parse(point.recordedAt) >= cutoff).sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt)).slice(-200);
+  if (!points.length) return;
+  try { await postLocationPoints(points, accessToken); await writeLocationBuffer([]); }
+  catch { await writeLocationBuffer(points); }
+}
+TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
+  if (error || !data) return;
+  const accessToken = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  const locations = (data as { locations?: Location.LocationObject[] }).locations || [];
+  const points = locations.map((location) => ({ lat: location.coords.latitude, lng: location.coords.longitude, accuracy: location.coords.accuracy ?? 0, heading: location.coords.heading ?? undefined, speed: location.coords.speed ?? undefined, recordedAt: new Date(location.timestamp).toISOString() }));
+  if (accessToken) await flushLocationBuffer(accessToken, points);
+  else await writeLocationBuffer([...await readLocationBuffer(), ...points]);
+});
 
 async function saveSession(session: Session) {
   currentSession = session;
@@ -182,6 +215,11 @@ export default function App() {
   const [offers, setOffers] = useState<Offer[]>([]);
   const [job, setJob] = useState<Job | null>(null);
   const [services, setServices] = useState<ServiceType[]>([]);
+  const [wallet, setWallet] = useState<Wallet>();
+  const [payouts, setPayouts] = useState<Payout[]>([]);
+  const [bank, setBank] = useState({ bankName: "", accountNumber: "", accountName: "" });
+  const [payoutNaira, setPayoutNaira] = useState("");
+  const [trackingState, setTrackingState] = useState<"OFF" | "IDLE" | "ACTIVE">("OFF");
   const [form, setForm] = useState({
     businessName: "",
     address: "",
@@ -219,6 +257,39 @@ export default function App() {
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
   }, [token, profile?.onboardingStatus]);
+  useEffect(() => {
+    if (!token || profile?.onboardingStatus !== OnboardingStatus.APPROVED) return;
+    void Promise.all([request<Wallet>("/provider/wallet", {}, token), request<Payout[]>("/provider/payouts", {}, token)])
+      .then(([nextWallet, nextPayouts]) => { setWallet(nextWallet); setPayouts(nextPayouts); })
+      .catch(() => undefined);
+  }, [token, profile?.onboardingStatus, job?.status]);
+  useEffect(() => {
+    if (!token || profile?.onboardingStatus !== OnboardingStatus.APPROVED) return;
+    const configure = async () => {
+      const shouldTrack = Boolean(job || ["ONLINE", "RESERVED", "BUSY"].includes(profile.availability || ""));
+      if (!shouldTrack) {
+        if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+        setTrackingState("OFF");
+        return;
+      }
+      const foreground = await Location.getForegroundPermissionsAsync();
+      const background = await Location.getBackgroundPermissionsAsync();
+      if (!foreground.granted || !background.granted) { setTrackingState("OFF"); return; }
+      const active = Boolean(job && ["ASSIGNED", "EN_ROUTE", "ARRIVED", "IN_PROGRESS"].includes(job.status));
+      if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+      await Location.startLocationUpdatesAsync(LOCATION_TASK, {
+        accuracy: active ? Location.Accuracy.High : Location.Accuracy.Balanced,
+        timeInterval: active ? 5000 : 30000,
+        distanceInterval: active ? 10 : 100,
+        pausesUpdatesAutomatically: false,
+        showsBackgroundLocationIndicator: active,
+        foregroundService: { notificationTitle: "RoadAid: You’re online", notificationBody: active ? "Sharing live location for your active job" : "Ready to receive nearby roadside requests", notificationColor: "#F4B942" },
+      });
+      setTrackingState(active ? "ACTIVE" : "IDLE");
+      await flushLocationBuffer(token);
+    };
+    void configure().catch(() => setTrackingState("OFF"));
+  }, [token, profile?.onboardingStatus, profile?.availability, job?.status]);
   useEffect(() => {
     if (!token || !process.env.EXPO_PUBLIC_EAS_PROJECT_ID) return;
     const register = async () => {
@@ -373,6 +444,8 @@ export default function App() {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted)
         throw new Error("Location permission is required to receive jobs.");
+      const background = await Location.requestBackgroundPermissionsAsync();
+      if (!background.granted) throw new Error("Choose ‘Allow all the time’ in location settings so customers can track active jobs when your phone is locked.");
       const point = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
@@ -398,6 +471,16 @@ export default function App() {
       );
       await load(token);
     });
+  }
+  async function saveBank() {
+    if (!token) return;
+    await act(async () => { await request("/provider/bank-account", { method: "PUT", body: JSON.stringify(bank) }, token); });
+  }
+  async function requestPayout() {
+    if (!token) return;
+    const naira = Number(payoutNaira);
+    if (!Number.isInteger(naira) || naira <= 0) return setError("Enter a whole-naira payout amount greater than zero.");
+    await act(async () => { await request("/provider/payouts", { method: "POST", body: JSON.stringify({ amountKobo: String(naira * 100) }) }, token); setPayouts(await request<Payout[]>("/provider/payouts", {}, token)); setPayoutNaira(""); });
   }
   async function respondToOffer(id: string, accept: boolean) {
     if (!token) return;
@@ -691,6 +774,12 @@ export default function App() {
             />
             {profile?.onboardingStatus === OnboardingStatus.APPROVED && (
               <>
+                <Notice
+                  title={trackingState === "ACTIVE" ? "Live job tracking" : trackingState === "IDLE" ? "Background location ready" : "Background location needs attention"}
+                  body={trackingState === "ACTIVE" ? "Your location is updating about every 5 seconds. Failed updates are queued and sent oldest-first when your connection returns." : trackingState === "IDLE" ? "RoadAid checks your position about every 30 seconds while you wait for work." : "Allow location all the time before going online so tracking continues while your phone is locked."}
+                  warning={trackingState === "OFF"}
+                />
+                {trackingState === "OFF" && <Link label="Open location settings" onPress={() => void Linking.openSettings()} />}
                 {job ? (
                   <View style={s.notice}>
                     <Text style={s.noticeTitle}>
@@ -781,6 +870,16 @@ export default function App() {
                     </View>
                   ))
                 )}
+                <Text style={s.section}>EARNINGS & PAYOUTS</Text>
+                <Summary label="Available balance" value={money(wallet?.balanceKobo ?? 0)} />
+                {wallet?.entries.length ? wallet.entries.slice(0, 5).map((entry) => <Summary key={entry.id} label={entry.description} value={`${entry.amountKobo < 0 ? "−" : "+"}${money(Math.abs(entry.amountKobo))}`} />) : <Notice title="No earnings yet" body="Completed paid jobs will appear here automatically." />}
+                <Field label="Bank name" value={bank.bankName} onChangeText={(bankName) => setBank({ ...bank, bankName })} maxLength={100} />
+                <Field label="10-digit account number" value={bank.accountNumber} onChangeText={(accountNumber) => setBank({ ...bank, accountNumber: accountNumber.replace(/\D/g, "").slice(0, 10) })} keyboardType="number-pad" />
+                <Field label="Account name" value={bank.accountName} onChangeText={(accountName) => setBank({ ...bank, accountName })} maxLength={255} />
+                <Button label="Save bank account" onPress={() => void saveBank()} busy={busy} disabled={!bank.bankName.trim() || bank.accountNumber.length !== 10 || !bank.accountName.trim()} />
+                <Field label="Payout amount (whole naira)" value={payoutNaira} onChangeText={(value) => setPayoutNaira(value.replace(/\D/g, ""))} keyboardType="number-pad" />
+                <Button label="Request payout" onPress={() => void requestPayout()} busy={busy} disabled={!payoutNaira || Boolean(payouts.find((payout) => payout.status === "REQUESTED"))} />
+                {payouts.length ? payouts.slice(0, 5).map((payout) => <Summary key={payout.id} label={`${new Date(payout.requestedAt).toLocaleDateString("en-NG")} · ${payout.status}`} value={money(payout.amountKobo)} />) : <Text style={s.muted}>No payout requests yet.</Text>}
               </>
             )}
             <Text style={s.section}>SERVICES</Text>
@@ -810,6 +909,8 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+const money = (kobo: number) => new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 0 }).format(Math.trunc(kobo / 100));
 
 function Screen({
   title,

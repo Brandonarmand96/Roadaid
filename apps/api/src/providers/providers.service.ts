@@ -22,6 +22,7 @@ import {
 
 @Injectable()
 export class ProvidersService {
+  private readonly lastEtaRefresh = new Map<string, number>();
   constructor(
     private readonly prisma: PrismaService,
     @Inject('STORAGE_SERVICE') private readonly storage: StorageService,
@@ -342,12 +343,12 @@ export class ProvidersService {
     return updated;
   }
 
-  async updateLocation(providerId: string, dto: LocationUpdateDto) {
+  async updateLocation(providerId: string, dto: LocationUpdateDto, emitRealtime = true) {
     const profile = await this.prisma.providerProfile.findUnique({ where: { userId: providerId } });
     if (!profile) throw new NotFoundException({ code: 'PROVIDER_PROFILE_NOT_FOUND', message: 'Provider profile not found' });
     const recordedAt = new Date(dto.recordedAt);
     const now = Date.now();
-    if (recordedAt.getTime() > now + 60_000 || recordedAt.getTime() < now - 24 * 60 * 60_000) {
+    if (recordedAt.getTime() > now + 60_000 || recordedAt.getTime() < now - 5 * 60_000) {
       throw new BadRequestException({ code: 'INVALID_LOCATION_TIME', message: 'Location timestamp is outside the accepted range' });
     }
     await this.prisma.$transaction(async (tx) => {
@@ -370,17 +371,31 @@ export class ProvidersService {
              ${dto.accuracy}, ${recordedAt}, now())`;
       }
     });
-    if (profile.currentRequestId) this.realtimeGateway.emitProviderLocation(profile.currentRequestId, { providerId, ...dto, receivedAt: new Date().toISOString() });
-    return { success: true, receivedAt: new Date().toISOString() };
+    const receivedAt = new Date().toISOString();
+    if (profile.currentRequestId && emitRealtime) {
+      this.realtimeGateway.emitProviderLocation(profile.currentRequestId, { requestId: profile.currentRequestId, providerId, ...dto, receivedAt });
+      if (now - (this.lastEtaRefresh.get(profile.currentRequestId) || 0) >= 30_000) {
+        const [distance] = await this.prisma.$queryRaw<Array<{ distance_m: number }>>`
+          SELECT ST_Distance(pickup_location, ST_SetSRID(ST_MakePoint(${dto.lng}, ${dto.lat}), 4326)::geography)::float AS distance_m
+          FROM service_requests WHERE id=${profile.currentRequestId}::uuid AND status='EN_ROUTE'`;
+        if (distance) {
+          const etaSeconds = Math.max(60, Math.round(distance.distance_m / 8.3));
+          await this.prisma.serviceRequest.update({ where: { id: profile.currentRequestId }, data: { etaSeconds } });
+          this.realtimeGateway.emitRequestEta(profile.currentRequestId, etaSeconds);
+          this.lastEtaRefresh.set(profile.currentRequestId, now);
+        }
+      }
+    }
+    return { success: true, receivedAt, warning: dto.accuracy > 200 ? 'LOW_ACCURACY' : undefined };
   }
 
   async updateLocationBatch(providerId: string, points: LocationUpdateDto[]) {
     if (!Array.isArray(points) || points.length === 0 || points.length > 200) throw new BadRequestException({ code: 'INVALID_LOCATION_BATCH', message: 'Location batch must contain between 1 and 200 points' });
     const ordered = [...points].sort((a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime());
-    for (const point of ordered) {
+    for (const [index, point] of ordered.entries()) {
       const parsed = locationUpdateSchema.safeParse(point);
       if (!parsed.success) throw new BadRequestException({ code: 'INVALID_LOCATION_POINT', message: 'Location batch contains an invalid point' });
-      await this.updateLocation(providerId, parsed.data);
+      await this.updateLocation(providerId, parsed.data, index === ordered.length - 1);
     }
     return { success: true, accepted: ordered.length };
   }

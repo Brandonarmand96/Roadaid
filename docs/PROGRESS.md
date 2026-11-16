@@ -384,3 +384,43 @@ Phase 3 dispatch is now authorized.
 - Workspace lint and typecheck: PASS; lint reports seven pre-existing unused-import warnings and no errors.
 - API and admin production builds: PASS.
 - New coverage includes exact negative refund and payout ledger entries alongside the existing signature, amount and commission reconciliation tests.
+
+### Slice 3 — Background tracking and provider wallet — 16 Nov 2026
+
+- Registered the provider background location task at module scope for locked-phone execution in an EAS development/production build.
+- Tracking switches between 30-second/100-metre idle updates and 5-second/10-metre active-job updates, with the Android foreground-service notification required by the platform.
+- Added a persistent 200-point offline buffer, five-minute server-window pruning and oldest-first batch replay; only the newest replayed point is emitted as live to customers.
+- Background tracking stops while the provider is offline and requires explicit foreground plus background permission before going online.
+- Location uploads older than five minutes are now rejected server-side; points with accuracy worse than 200 metres are stored with a warning but excluded from dispatch eligibility.
+- Added 30-second server-owned ETA refresh during `EN_ROUTE`, using the specified straight-line/fixed-speed fallback and realtime `request.eta` emission.
+- Customer mobile now distinguishes live, delayed (>30 seconds) and connection-lost (>120 seconds) provider positions without presenting stale coordinates as current.
+- Provider mobile now includes the ledger-derived available balance, recent earnings, bank-account form, payout request controls and payout history with pending-request protection.
+- Impeccable hardening guidance shaped explicit permission, offline-buffer, empty-wallet, disabled-action and stale-location states; its detector reports no findings in the changed mobile screens.
+
+### Slice 3 verification
+
+- API tests: PASS (61/61 across 13 suites), including oldest-first batch replay and the 200-point boundary.
+- Workspace lint: PASS with seven pre-existing warnings and no errors.
+- Workspace typecheck: PASS (all six workspaces).
+- Impeccable detector: PASS (no findings).
+
+### Slice 4 — Admin live operations and finance workspace — 16 Nov 2026
+
+- Added a role-aware admin workspace: OPERATIONS no longer requests forbidden finance resources, FINANCE no longer fails on provider-review resources, and SUPER_ADMIN retains the combined view.
+- Added Lagos-day KPI reporting for requests, active/completed jobs, completion rate, online providers, escalations, collected revenue and average acceptance time.
+- Added the specification-selected Google Maps React integration with online/busy provider markers, active-request pickup markers and a clear configuration fallback when the browser key is absent.
+- Admin sockets now update provider positions in place and debounce broader refreshes for request, alert and availability changes.
+- Added payment and payout queues with audited manual-payment, refund, approve/reject and bank-transfer completion controls exposed only to finance-capable roles.
+- Added Lagos-time payout timestamps, explicit empty states and date-range CSV downloads for requests, revenue, providers and payouts.
+- Hardened report date validation and aligned “today” calculations with `Africa/Lagos` rather than UTC midnight.
+- Added the mandatory webhook replay regression: duplicate Paystack event IDs return success without a second gateway verification or ledger write.
+- Impeccable guidance shaped responsive metric density, overflow handling, permission-aware surfaces, loading/empty/error states and keyboard-visible controls; the detector reports no findings.
+
+### Slice 4 verification
+
+- API tests: PASS (62/62 across 13 suites), including duplicate-webhook replay.
+- Shared tests: PASS (4/4).
+- Workspace typecheck: PASS (all six workspaces).
+- Workspace lint: PASS; only the seven existing API unused-import warnings remain.
+- API and admin production builds: PASS.
+- Impeccable detector: PASS (no findings on the admin workspace).

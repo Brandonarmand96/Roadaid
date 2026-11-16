@@ -71,7 +71,7 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
         JOIN users u ON u.id=pp.user_id AND u.status='ACTIVE'
         JOIN provider_locations pl ON pl.provider_id=pp.user_id
         WHERE sr.id=${requestId}::uuid AND pp.onboarding_status='APPROVED' AND pp.availability='ONLINE' AND pp.current_request_id IS NULL
-          AND pl.received_at > now() - make_interval(secs => ${settings.staleLocationSeconds})
+          AND pl.received_at > now() - make_interval(secs => ${settings.staleLocationSeconds}) AND pl.accuracy_m <= 200
           AND ST_DWithin(pl.location, sr.pickup_location, ${settings.searchRadiusKm * 1000})
           AND NOT EXISTS (SELECT 1 FROM dispatch_offers o WHERE o.request_id=sr.id AND o.provider_id=pp.user_id AND o.round=${request.dispatch_round})
         ORDER BY ST_Distance(pl.location, sr.pickup_location), pp.completed_jobs, pp.user_id
@@ -83,7 +83,7 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
           JOIN provider_profiles pp ON pp.user_id=ps.provider_id AND pp.onboarding_status='APPROVED' AND pp.availability='ONLINE' AND pp.current_request_id IS NULL
           JOIN provider_locations pl ON pl.provider_id=pp.user_id
           JOIN users u ON u.id=pp.user_id AND u.status='ACTIVE'
-          WHERE sr.id=${requestId}::uuid AND pl.received_at > now() - make_interval(secs => ${settings.staleLocationSeconds})
+          WHERE sr.id=${requestId}::uuid AND pl.received_at > now() - make_interval(secs => ${settings.staleLocationSeconds}) AND pl.accuracy_m <= 200
           AND ST_DWithin(pl.location, sr.pickup_location, ${settings.searchRadiusKm * 1000})`;
         if (Number(visibleEligible[0]?.count || 0) > 0) return { kind: 'retry' as const, count: request.offers_made_count };
         return this.escalateTx(tx, requestId, 'NO_ELIGIBLE_PROVIDER');
@@ -220,7 +220,7 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
       FROM service_requests sr
       JOIN provider_services ps ON ps.service_type=sr.service_type AND ps.status='APPROVED'
       JOIN provider_profiles pp ON pp.user_id=ps.provider_id AND pp.onboarding_status='APPROVED' AND pp.availability='ONLINE' AND pp.current_request_id IS NULL
-      JOIN provider_locations pl ON pl.provider_id=pp.user_id AND pl.received_at > now() - interval '90 seconds'
+      JOIN provider_locations pl ON pl.provider_id=pp.user_id AND pl.received_at > now() - interval '90 seconds' AND pl.accuracy_m <= 200
       JOIN users u ON u.id=pp.user_id AND u.status='ACTIVE'
       WHERE sr.id=${requestId}::uuid ORDER BY ST_Distance(pl.location, sr.pickup_location) LIMIT 50`;
   }

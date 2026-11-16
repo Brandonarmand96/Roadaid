@@ -127,7 +127,9 @@ export class AdminController {
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
   async report(@Param('kind') kind: 'requests' | 'revenue' | 'providers' | 'payouts', @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Query('format') format: string | undefined, @Res({ passthrough: true }) response: Response) {
     if (!['requests', 'revenue', 'providers', 'payouts'].includes(kind)) throw new BadRequestException({ code: 'INVALID_REPORT', message: 'Unknown report type' });
-    const rows = await this.adminService.report(kind, from ? new Date(from) : undefined, to ? new Date(to) : undefined) as unknown as Record<string, unknown>[];
+    const fromDate = from ? new Date(from) : undefined; const toDate = to ? new Date(to) : undefined;
+    if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime())) || (fromDate && toDate && fromDate > toDate)) throw new BadRequestException({ code: 'INVALID_REPORT_RANGE', message: 'Report dates are invalid or out of order' });
+    const rows = await this.adminService.report(kind, fromDate, toDate) as unknown as Record<string, unknown>[];
     if (format !== 'csv') return rows;
     response.type('text/csv'); response.setHeader('Content-Disposition', `attachment; filename="roadaid-${kind}.csv"`);
     if (!rows.length) return '';

@@ -214,4 +214,20 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
       );
     });
   });
+
+  describe('Location batch recovery', () => {
+    it('replays buffered points oldest-first and emits only the newest point', async () => {
+      const spy = jest.spyOn(service, 'updateLocation').mockResolvedValue({ success: true, receivedAt: new Date().toISOString(), warning: undefined });
+      const newest = { lat: 9.2, lng: 7.2, accuracy: 10, recordedAt: new Date().toISOString() };
+      const oldest = { lat: 9.1, lng: 7.1, accuracy: 10, recordedAt: new Date(Date.now() - 30_000).toISOString() };
+      await service.updateLocationBatch('prov-1', [newest, oldest]);
+      expect(spy.mock.calls[0]).toEqual(['prov-1', oldest, false]);
+      expect(spy.mock.calls[1]).toEqual(['prov-1', newest, true]);
+    });
+
+    it('rejects a buffer larger than 200 points', async () => {
+      const points = Array.from({ length: 201 }, (_, index) => ({ lat: 9, lng: 7, accuracy: 10, recordedAt: new Date(Date.now() - index).toISOString() }));
+      await expect(service.updateLocationBatch('prov-1', points)).rejects.toThrow(BadRequestException);
+    });
+  });
 });

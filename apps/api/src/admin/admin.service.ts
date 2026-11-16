@@ -351,7 +351,7 @@ export class AdminService {
     return result;
   }
 
-  getPayments() { return this.prisma.payment.findMany({ include: { request: { select: { code: true, serviceType: true, status: true } } }, orderBy: { createdAt: 'desc' }, take: 200 }); }
+  getPayments() { return this.prisma.payment.findMany({ include: { request: { select: { code: true, serviceType: true, status: true, paymentStatus: true } } }, orderBy: { createdAt: 'desc' }, take: 200 }); }
   getPayouts() { return this.prisma.payoutRequest.findMany({ include: { provider: { include: { user: { select: { fullName: true, phone: true } } } } }, orderBy: { requestedAt: 'desc' }, take: 200 }); }
 
   async decidePayout(id: string, approve: boolean, note: string | undefined, adminId: string, adminRole: string, ip?: string) {
@@ -371,7 +371,8 @@ export class AdminService {
   }
 
   async dashboard() {
-    const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+    const lagosNow = new Date(Date.now() + 60 * 60_000);
+    const start = new Date(Date.UTC(lagosNow.getUTCFullYear(), lagosNow.getUTCMonth(), lagosNow.getUTCDate()) - 60 * 60_000);
     const activeStatuses = [RequestStatus.ASSIGNED, RequestStatus.EN_ROUTE, RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS];
     const [requestsToday, activeJobs, completedToday, onlineProviders, escalatedCount, revenue, accepted] = await Promise.all([
       this.prisma.serviceRequest.count({ where: { createdAt: { gte: start } } }),
@@ -392,7 +393,10 @@ export class AdminService {
              ST_Y(pl.location::geometry) AS lat, ST_X(pl.location::geometry) AS lng, pl.received_at AS "receivedAt"
       FROM provider_profiles pp JOIN users u ON u.id=pp.user_id JOIN provider_locations pl ON pl.provider_id=pp.user_id
       WHERE pp.availability IN ('ONLINE','RESERVED','BUSY')`;
-    const activeRequests = await this.prisma.serviceRequest.findMany({ where: { status: { in: [RequestStatus.ASSIGNED, RequestStatus.EN_ROUTE, RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS] } }, select: { id: true, code: true, serviceType: true, status: true, providerId: true, pickupAddress: true, etaSeconds: true } });
+    const activeRequests = await this.prisma.$queryRaw<Array<{ id: string; code: string; serviceType: string; status: string; providerId: string | null; pickupAddress: string; etaSeconds: number | null; lat: number; lng: number }>>`
+      SELECT id, code, service_type::text AS "serviceType", status::text, provider_id AS "providerId", pickup_address AS "pickupAddress", eta_seconds AS "etaSeconds",
+             ST_Y(pickup_location::geometry) AS lat, ST_X(pickup_location::geometry) AS lng
+      FROM service_requests WHERE status IN ('ASSIGNED','EN_ROUTE','ARRIVED','IN_PROGRESS')`;
     return { providers, activeRequests, serverNow: new Date() };
   }
 
