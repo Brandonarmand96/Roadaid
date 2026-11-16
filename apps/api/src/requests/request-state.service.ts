@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CancelledBy, OfferStatus, Prisma, RequestStatus } from '@prisma/client';
+import { CancelledBy, LedgerEntryType, OfferStatus, PaymentStatus, Prisma, RequestStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
@@ -24,6 +24,10 @@ export class RequestStateService {
       const current = rows[0];
       if (!current) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
       if (!transitions[current.status].includes(to)) throw new BadRequestException({ code: 'INVALID_REQUEST_TRANSITION', message: `Cannot transition from ${current.status} to ${to}` });
+      if (to === RequestStatus.IN_PROGRESS) {
+        const paymentGate = await tx.serviceRequest.findUniqueOrThrow({ where: { id: requestId }, select: { paymentMode: true, paymentStatus: true } });
+        if (paymentGate.paymentMode === 'ONLINE_AFTER_ACCEPT' && paymentGate.paymentStatus !== PaymentStatus.PAID) throw new BadRequestException({ code: 'PAYMENT_REQUIRED', message: 'Payment is required before service can begin' });
+      }
       const timestampData = to === RequestStatus.ARRIVED ? { arrivedAt: new Date() }
           : to === RequestStatus.IN_PROGRESS ? { startedAt: new Date() }
             : to === RequestStatus.COMPLETED ? { completedAt: new Date() }
@@ -32,6 +36,16 @@ export class RequestStateService {
       await tx.requestEvent.create({ data: { requestId, type: 'STATUS_CHANGED', actorType: actor.type, actorId: actor.id, payload: { ...payload as object, from: current.status, to } } });
       if ((new Set<RequestStatus>([RequestStatus.COMPLETED, RequestStatus.CANCELLED])).has(to) && request.providerId) {
         await tx.providerProfile.updateMany({ where: { userId: request.providerId, currentRequestId: requestId }, data: { currentRequestId: null, availability: 'ONLINE' } });
+      }
+      if (to === RequestStatus.COMPLETED && request.providerId && request.paymentStatus === PaymentStatus.PAID) {
+        const payment = await tx.payment.findFirst({ where: { requestId, status: PaymentStatus.PAID }, orderBy: { paidAt: 'desc' } });
+        const existing = await tx.ledgerEntry.findFirst({ where: { requestId, providerId: request.providerId, type: LedgerEntryType.PROVIDER_EARNING } });
+        if (payment && !existing) {
+          const commission = request.priceKobo * BigInt(request.commissionBps) / 10_000n;
+          const earning = request.priceKobo - commission;
+          await tx.ledgerEntry.create({ data: { type: LedgerEntryType.PROVIDER_EARNING, requestId, paymentId: payment.id, providerId: request.providerId, amountKobo: earning, description: `Provider earning for ${request.code}` } });
+          await tx.providerProfile.update({ where: { userId: request.providerId }, data: { walletBalanceKobo: { increment: earning }, completedJobs: { increment: 1 } } });
+        }
       }
       return request;
     });

@@ -17,6 +17,7 @@ import {
   DocumentType,
   Role,
   LocationUpdateDto,
+  locationUpdateSchema,
 } from '@roadaid/shared';
 
 @Injectable()
@@ -371,6 +372,17 @@ export class ProvidersService {
     });
     if (profile.currentRequestId) this.realtimeGateway.emitProviderLocation(profile.currentRequestId, { providerId, ...dto, receivedAt: new Date().toISOString() });
     return { success: true, receivedAt: new Date().toISOString() };
+  }
+
+  async updateLocationBatch(providerId: string, points: LocationUpdateDto[]) {
+    if (!Array.isArray(points) || points.length === 0 || points.length > 200) throw new BadRequestException({ code: 'INVALID_LOCATION_BATCH', message: 'Location batch must contain between 1 and 200 points' });
+    const ordered = [...points].sort((a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime());
+    for (const point of ordered) {
+      const parsed = locationUpdateSchema.safeParse(point);
+      if (!parsed.success) throw new BadRequestException({ code: 'INVALID_LOCATION_POINT', message: 'Location batch contains an invalid point' });
+      await this.updateLocation(providerId, parsed.data);
+    }
+    return { success: true, accepted: ordered.length };
   }
 
   private async ensureProfileExists(userId: string) {

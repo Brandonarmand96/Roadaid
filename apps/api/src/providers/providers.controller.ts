@@ -138,4 +138,10 @@ export class ProvidersController {
   ) {
     return this.providersService.updateLocation(providerId, dto);
   }
+
+  @Post('location/batch')
+  @HttpCode(HttpStatus.OK)
+  async updateLocationBatch(@CurrentUser('id') providerId: string, @Body() body: { points: LocationUpdateDto[] }) {
+    return this.providersService.updateLocationBatch(providerId, body.points);
+  }
 }

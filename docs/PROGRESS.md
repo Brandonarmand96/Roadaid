@@ -237,7 +237,7 @@ Phase 3 dispatch is now authorized.
 
 ## Phase 3: Dispatch
 
-**Status:** In progress
+**Status:** Gate passed on physical devices
 **Started:** 14 Nov 2026
 
 ### Slice 1 — Location and transactional offers
@@ -329,4 +329,58 @@ Phase 3 dispatch is now authorized.
   - `uq_request_one_pending_offer`
 - PostGIS and Redis containers were restarted for live verification and remain available.
 
-**Remaining Phase 3 acceptance evidence:** Expo account login/project initialization, provider development APK, background push on a locked phone, and the physical customer + two-provider sequential fallback journey.
+**Pre-gate evidence request:** Expo account login/project initialization, provider development APK, background push on a locked phone, and the physical customer + two-provider sequential fallback journey.
+
+### Acceptance Gate — Passed 16 Nov 2026
+
+- The user confirmed Phase 3 was tested and authorized the move to Phase 4.
+- Phase 3's automated gate remains green: API dispatch/security/recovery tests and the isolated 50-request/20-provider concurrency run pass without duplicate provider or request assignments.
+
+---
+
+## Phase 4: Tracking, Payments, Wallet & Reports
+
+**Status:** In progress
+**Started:** 16 Nov 2026
+
+### Slice 1 — Payment and wallet invariants
+
+- Added the Paystack gateway abstraction and transaction initialization using exact integer-kobo amounts.
+- Added raw-body HMAC-SHA512 webhook verification, Paystack server-side re-verification, currency/amount matching and replay-safe webhook event storage.
+- Paid transactions atomically update the request and create customer-payment and platform-commission ledger entries.
+- Provider earnings are credited exactly once when both completion and payment conditions are satisfied, supporting both configured payment modes.
+- Provider progression to `IN_PROGRESS` is blocked until payment in `ONLINE_AFTER_ACCEPT` mode.
+- Added ledger-derived wallet and earnings APIs, bank-account management and payout requests with row locking, one-pending-request enforcement and balance validation.
+- Added batched provider location ingestion (up to 200 points), ordered oldest-first and validated point-by-point for offline recovery.
+
+### Verification so far
+
+- API lint: PASS (pre-existing warnings only).
+- API typecheck: PASS.
+- API tests: PASS (54/54 across 12 suites).
+- New regressions cover invalid Paystack signatures, verified amount mismatch, exact-kobo commission/earning reconciliation, payout-over-balance rejection and payment-gated job progression.
+
+### Remaining Phase 4 work
+
+- Background provider tracking configuration, offline buffer persistence, ETA refresh and customer stale-location UI.
+- Customer receipt polish and provider wallet/earnings/payout interfaces.
+- Admin live-map, KPI, payment/payout and report dashboard surfaces (the backing APIs and CSV exports are complete).
+- Full webhook replay, refund, payout ledger, tracking authorization and device acceptance suites, followed by the paid journey gate for all three services.
+
+### Slice 2 — Finance operations, feedback and reporting — 16 Nov 2026
+
+- Added audited FINANCE/SUPER_ADMIN controls for manual payment, refunds, payout approval/rejection and manual bank-transfer completion.
+- Refunds and paid payouts lock their source rows and append exact negative integer-kobo ledger entries, preventing replay from double-writing financial state.
+- Failed webhook processing now removes its idempotency reservation so Paystack can retry safely; successfully recorded event IDs still short-circuit replays.
+- Added customer rating and dispute endpoints with ownership filtering, terminal-state rules, one-rating/one-dispute enforcement and append-only request events.
+- Provider rating aggregates update transactionally with the completed request rating.
+- Added admin dashboard KPIs, live provider/job snapshot, payment/payout queues and requests/revenue/providers/payouts reports in JSON or escaped CSV.
+- Customer mobile now exposes payment, rating and dispute actions in the live request history; admin request detail exposes manual payment and refund actions.
+
+### Slice 2 verification
+
+- API typecheck: PASS.
+- API tests: PASS (59/59 across 13 suites).
+- Workspace lint and typecheck: PASS; lint reports seven pre-existing unused-import warnings and no errors.
+- API and admin production builds: PASS.
+- New coverage includes exact negative refund and payout ledger entries alongside the existing signature, amount and commission reconciliation tests.

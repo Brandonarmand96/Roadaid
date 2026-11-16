@@ -16,6 +16,9 @@ import {
 import { DispatchSettingsDto, PricingRuleDto } from '@roadaid/shared';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { RequestStateService } from '../requests/request-state.service';
+import { PaymentsService } from '../payments/payments.service';
+import { WalletService } from '../wallet/wallet.service';
+import { PaymentStatus, PayoutStatus, RequestStatus } from '@prisma/client';
 
 @Injectable()
 export class AdminService {
@@ -25,6 +28,8 @@ export class AdminService {
     @Inject('STORAGE_SERVICE') private readonly storage: StorageService,
     private readonly dispatch: DispatchService,
     private readonly states: RequestStateService,
+    private readonly paymentsService: PaymentsService,
+    private readonly walletService: WalletService,
   ) {}
 
   async getProviders(filters: { status?: OnboardingStatus; service?: ServiceType; q?: string }) {
@@ -332,5 +337,70 @@ export class AdminService {
     }
 
     return customer;
+  }
+
+  async markRequestPaid(id: string, reason: string, adminId: string, adminRole: string, ip?: string) {
+    const result = await this.paymentsService.markPaidManually(id, adminId, reason);
+    await this.auditService.log({ actorId: adminId, actorRole: adminRole, action: 'REQUEST_MARKED_PAID', entityType: 'SERVICE_REQUEST', entityId: id, after: { paymentId: result.id, reason }, ip });
+    return result;
+  }
+
+  async refundRequest(id: string, reason: string, refundReference: string | undefined, adminId: string, adminRole: string, ip?: string) {
+    const result = await this.paymentsService.refund(id, adminId, reason, refundReference);
+    await this.auditService.log({ actorId: adminId, actorRole: adminRole, action: 'REQUEST_REFUNDED', entityType: 'SERVICE_REQUEST', entityId: id, after: { reason, refundReference }, ip });
+    return result;
+  }
+
+  getPayments() { return this.prisma.payment.findMany({ include: { request: { select: { code: true, serviceType: true, status: true } } }, orderBy: { createdAt: 'desc' }, take: 200 }); }
+  getPayouts() { return this.prisma.payoutRequest.findMany({ include: { provider: { include: { user: { select: { fullName: true, phone: true } } } } }, orderBy: { requestedAt: 'desc' }, take: 200 }); }
+
+  async decidePayout(id: string, approve: boolean, note: string | undefined, adminId: string, adminRole: string, ip?: string) {
+    const before = await this.prisma.payoutRequest.findUnique({ where: { id } });
+    if (!before) throw new NotFoundException({ code: 'PAYOUT_NOT_FOUND', message: 'Payout request not found' });
+    if (before.status !== PayoutStatus.REQUESTED) throw new BadRequestException({ code: 'PAYOUT_ALREADY_REVIEWED', message: 'Payout request has already been reviewed' });
+    const status = approve ? PayoutStatus.APPROVED : PayoutStatus.REJECTED;
+    const after = await this.prisma.payoutRequest.update({ where: { id }, data: { status, note: note?.trim() || null, reviewedBy: adminId, reviewedAt: new Date() } });
+    await this.auditService.log({ actorId: adminId, actorRole: adminRole, action: `PAYOUT_${status}`, entityType: 'PAYOUT_REQUEST', entityId: id, before, after, ip });
+    return after;
+  }
+
+  async markPayoutPaid(id: string, reference: string, adminId: string, adminRole: string, ip?: string) {
+    const result = await this.walletService.markPaid(id, adminId, reference);
+    await this.auditService.log({ actorId: adminId, actorRole: adminRole, action: 'PAYOUT_PAID', entityType: 'PAYOUT_REQUEST', entityId: id, after: { reference }, ip });
+    return result;
+  }
+
+  async dashboard() {
+    const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+    const activeStatuses = [RequestStatus.ASSIGNED, RequestStatus.EN_ROUTE, RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS];
+    const [requestsToday, activeJobs, completedToday, onlineProviders, escalatedCount, revenue, accepted] = await Promise.all([
+      this.prisma.serviceRequest.count({ where: { createdAt: { gte: start } } }),
+      this.prisma.serviceRequest.count({ where: { status: { in: activeStatuses } } }),
+      this.prisma.serviceRequest.count({ where: { status: RequestStatus.COMPLETED, completedAt: { gte: start } } }),
+      this.prisma.providerProfile.count({ where: { availability: { in: ['ONLINE', 'RESERVED'] } } }),
+      this.prisma.serviceRequest.count({ where: { status: RequestStatus.ESCALATED } }),
+      this.prisma.payment.aggregate({ where: { status: PaymentStatus.PAID, paidAt: { gte: start } }, _sum: { amountKobo: true } }),
+      this.prisma.serviceRequest.findMany({ where: { acceptedAt: { not: null }, searchStartedAt: { gte: start } }, select: { acceptedAt: true, searchStartedAt: true } }),
+    ]);
+    const avgTimeToAcceptSeconds = accepted.length ? Math.round(accepted.reduce((sum, row) => sum + ((row.acceptedAt!.getTime() - row.searchStartedAt.getTime()) / 1000), 0) / accepted.length) : 0;
+    return { requestsToday, activeJobs, completedToday, completionRateBps: requestsToday ? Math.floor(completedToday * 10_000 / requestsToday) : 0, onlineProviders, escalatedCount, revenueTodayKobo: revenue._sum.amountKobo || 0n, avgTimeToAcceptSeconds };
+  }
+
+  async liveSnapshot() {
+    const providers = await this.prisma.$queryRaw<Array<{ providerId: string; fullName: string | null; availability: string; lat: number; lng: number; receivedAt: Date }>>`
+      SELECT pp.user_id AS "providerId", u.full_name AS "fullName", pp.availability::text,
+             ST_Y(pl.location::geometry) AS lat, ST_X(pl.location::geometry) AS lng, pl.received_at AS "receivedAt"
+      FROM provider_profiles pp JOIN users u ON u.id=pp.user_id JOIN provider_locations pl ON pl.provider_id=pp.user_id
+      WHERE pp.availability IN ('ONLINE','RESERVED','BUSY')`;
+    const activeRequests = await this.prisma.serviceRequest.findMany({ where: { status: { in: [RequestStatus.ASSIGNED, RequestStatus.EN_ROUTE, RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS] } }, select: { id: true, code: true, serviceType: true, status: true, providerId: true, pickupAddress: true, etaSeconds: true } });
+    return { providers, activeRequests, serverNow: new Date() };
+  }
+
+  async report(kind: 'requests' | 'revenue' | 'providers' | 'payouts', from?: Date, to?: Date) {
+    const createdAt = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
+    if (kind === 'requests') return this.prisma.serviceRequest.findMany({ where: { createdAt }, orderBy: { createdAt: 'desc' }, select: { code: true, serviceType: true, status: true, priceKobo: true, paymentStatus: true, createdAt: true, completedAt: true } });
+    if (kind === 'revenue') return this.prisma.payment.findMany({ where: { createdAt, status: { in: [PaymentStatus.PAID, PaymentStatus.REFUNDED] } }, orderBy: { createdAt: 'desc' }, select: { reference: true, amountKobo: true, status: true, gateway: true, paidAt: true } });
+    if (kind === 'payouts') return this.prisma.payoutRequest.findMany({ where: { createdAt }, orderBy: { createdAt: 'desc' }, select: { id: true, providerId: true, amountKobo: true, status: true, requestedAt: true, paidReference: true } });
+    return this.prisma.providerProfile.findMany({ where: { createdAt }, orderBy: { createdAt: 'desc' }, select: { userId: true, onboardingStatus: true, availability: true, completedJobs: true, ratingAvg: true, ratingCount: true, createdAt: true } });
   }
 }

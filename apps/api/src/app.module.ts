@@ -10,6 +10,8 @@ import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
 import { PricingModule } from './pricing/pricing.module';
 import { RequestsModule } from './requests/requests.module';
+import { PaymentsModule } from './payments/payments.module';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { RequestsModule } from './requests/requests.module';
     AdminModule,
     PricingModule,
     RequestsModule,
+    PaymentsModule,
+    WalletModule,
   ],
 })
 export class AppModule {}

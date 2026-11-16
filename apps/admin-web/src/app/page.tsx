@@ -68,6 +68,7 @@ type RoadRequest = {
   code: string;
   serviceType: string;
   status: string;
+  paymentStatus: string;
   priceKobo: number;
   pickupAddress: string;
   createdAt: string;
@@ -283,6 +284,21 @@ export default function AdminHomePage() {
       );
       await load();
     });
+  }
+
+  async function markRequestPaid(id: string) {
+    const reason = window.prompt('Why is this payment being recorded manually?');
+    if (!reason) return;
+    await mutate(`/admin/requests/${id}/mark-paid`, { reason });
+    await openRequest(id);
+  }
+
+  async function refundRequest(id: string) {
+    const reason = window.prompt('Reason for the refund');
+    if (!reason) return;
+    const refundReference = window.prompt('Paystack or bank refund reference (optional)') || undefined;
+    await mutate(`/admin/requests/${id}/refund`, { reason, refundReference });
+    await openRequest(id);
   }
 
   if (!token)
@@ -544,6 +560,8 @@ export default function AdminHomePage() {
                     {selectedRequest.status === 'ESCALATED' && <Action label="Re-dispatch" onClick={() => void redispatchRequest(selectedRequest.id)} />}
                     {['ESCALATED', 'SEARCHING'].includes(selectedRequest.status) && <Action label="Assign provider" onClick={() => void assignRequest(selectedRequest.id)} />}
                     {!['COMPLETED', 'CANCELLED'].includes(selectedRequest.status) && <Action label="Cancel" tone="danger" onClick={() => void cancelRequest(selectedRequest.id)} />}
+                    {selectedRequest.paymentStatus !== 'PAID' && selectedRequest.paymentStatus !== 'REFUNDED' && <Action label="Mark paid" onClick={() => void markRequestPaid(selectedRequest.id)} />}
+                    {selectedRequest.paymentStatus === 'PAID' && <Action label="Refund" tone="danger" onClick={() => void refundRequest(selectedRequest.id)} />}
                   </div>
                 </div>
                 <div className="mt-3 space-y-3">

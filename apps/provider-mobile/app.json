@@ -33,6 +33,12 @@
     "plugins": [
       "expo-secure-store",
       "expo-notifications"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "56bfab39-d430-46c9-8e6b-0ba01a26ecbc"
+      }
+    },
+    "owner": "leroicodes"
   }
 }

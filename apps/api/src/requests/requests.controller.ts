@@ -16,4 +16,6 @@ export class RequestsController {
   @Get() list(@CurrentUser('id') id: string) { return this.requests.listOwned(id); }
   @Get(':id') detail(@CurrentUser('id') customerId: string, @Param('id') id: string) { return this.requests.getOwned(customerId, id); }
   @Post(':id/cancel') cancel(@CurrentUser('id') customerId: string, @Param('id') id: string, @Body(new ZodValidationPipe(cancelRequestSchema)) dto: CancelRequestDto) { return this.requests.cancelOwned(customerId, id, dto.reason); }
+  @Post(':id/rating') rate(@CurrentUser('id') customerId: string, @Param('id') id: string, @Body() body: { rating: number; review?: string }) { return this.requests.rateOwned(customerId, id, body.rating, body.review); }
+  @Post(':id/dispute') dispute(@CurrentUser('id') customerId: string, @Param('id') id: string, @Body('reason') reason: string) { return this.requests.disputeOwned(customerId, id, reason); }
 }

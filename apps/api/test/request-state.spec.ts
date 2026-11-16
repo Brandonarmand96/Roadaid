@@ -9,6 +9,8 @@ describe('RequestStateService', () => {
     requestEvent: { create: jest.fn() },
     providerProfile: { updateMany: jest.fn() },
     dispatchOffer: { findFirst: jest.fn(), update: jest.fn() },
+    payment: { findFirst: jest.fn() },
+    ledgerEntry: { findFirst: jest.fn(), create: jest.fn() },
   };
   const prisma: any = { $transaction: jest.fn((callback) => callback(tx)) };
   const realtime: any = { emitRequestUpdated: jest.fn() };
@@ -43,6 +45,13 @@ describe('RequestStateService', () => {
   it('blocks customer cancellation after arrival', async () => {
     tx.$queryRaw.mockResolvedValue([{ status: RequestStatus.ARRIVED, customer_id: 'customer-1', provider_id: 'provider-1' }]);
     await expect(service.cancel('request-1', { type: 'CUSTOMER', id: 'customer-1' }, 'Changed mind')).rejects.toThrow(BadRequestException);
+  });
+
+  it('blocks starting service until an after-accept payment is paid', async () => {
+    tx.$queryRaw.mockResolvedValue([{ status: RequestStatus.ARRIVED }]);
+    tx.serviceRequest.findUniqueOrThrow = jest.fn().mockResolvedValue({ paymentMode: 'ONLINE_AFTER_ACCEPT', paymentStatus: 'PENDING' });
+    await expect(service.transition('request-1', RequestStatus.IN_PROGRESS, { type: 'PROVIDER', id: 'provider-1' })).rejects.toThrow(BadRequestException);
+    expect(tx.serviceRequest.update).not.toHaveBeenCalled();
   });
 
   it('cancels a pending offer and releases its reserved provider atomically', async () => {

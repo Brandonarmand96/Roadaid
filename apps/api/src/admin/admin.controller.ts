@@ -1,5 +1,6 @@
 import {
   Controller,
+  BadRequestException,
   Get,
   Post,
   Param,
@@ -9,7 +10,9 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { AdminService } from './admin.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -83,6 +86,55 @@ export class AdminController {
   @Post('requests/:id/cancel')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   cancelRequest(@Param('id') id: string, @Body('reason') reason: string, @CurrentUser() admin: AuthenticatedUser) { return this.adminService.cancelRequest(id, reason || 'Cancelled by Operations', admin.id); }
+
+  @Post('requests/:id/mark-paid')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  markPaid(@Param('id') id: string, @Body('reason') reason: string, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) { return this.adminService.markRequestPaid(id, reason, admin.id, admin.adminRole || 'ADMIN', req.ip); }
+
+  @Post('requests/:id/refund')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  refund(@Param('id') id: string, @Body() body: { reason: string; refundReference?: string }, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) { return this.adminService.refundRequest(id, body.reason, body.refundReference, admin.id, admin.adminRole || 'ADMIN', req.ip); }
+
+  @Get('dashboard')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS, AdminRole.FINANCE)
+  dashboard() { return this.adminService.dashboard(); }
+
+  @Get('live')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  live() { return this.adminService.liveSnapshot(); }
+
+  @Get('payments')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  payments() { return this.adminService.getPayments(); }
+
+  @Get('payouts')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  payouts() { return this.adminService.getPayouts(); }
+
+  @Post('payouts/:id/approve')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  approvePayout(@Param('id') id: string, @Body('note') note: string | undefined, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) { return this.adminService.decidePayout(id, true, note, admin.id, admin.adminRole || 'ADMIN', req.ip); }
+
+  @Post('payouts/:id/reject')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  rejectPayout(@Param('id') id: string, @Body('note') note: string | undefined, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) { return this.adminService.decidePayout(id, false, note, admin.id, admin.adminRole || 'ADMIN', req.ip); }
+
+  @Post('payouts/:id/mark-paid')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  markPayoutPaid(@Param('id') id: string, @Body('reference') reference: string, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) { return this.adminService.markPayoutPaid(id, reference, admin.id, admin.adminRole || 'ADMIN', req.ip); }
+
+  @Get('reports/:kind')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  async report(@Param('kind') kind: 'requests' | 'revenue' | 'providers' | 'payouts', @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Query('format') format: string | undefined, @Res({ passthrough: true }) response: Response) {
+    if (!['requests', 'revenue', 'providers', 'payouts'].includes(kind)) throw new BadRequestException({ code: 'INVALID_REPORT', message: 'Unknown report type' });
+    const rows = await this.adminService.report(kind, from ? new Date(from) : undefined, to ? new Date(to) : undefined) as unknown as Record<string, unknown>[];
+    if (format !== 'csv') return rows;
+    response.type('text/csv'); response.setHeader('Content-Disposition', `attachment; filename="roadaid-${kind}.csv"`);
+    if (!rows.length) return '';
+    const columns = Object.keys(rows[0]);
+    const cell = (value: unknown) => `"${String(typeof value === 'bigint' ? value.toString() : value instanceof Date ? value.toISOString() : value ?? '').replaceAll('"', '""')}"`;
+    return [columns.map(cell).join(','), ...rows.map((row) => columns.map((column) => cell(row[column])).join(','))].join('\n');
+  }
 
   @Get('providers')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)

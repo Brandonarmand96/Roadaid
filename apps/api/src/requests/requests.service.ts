@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, RequestStatus } from '@prisma/client';
 import { CreateServiceRequestDto, QuoteRequestDto } from '@roadaid/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
@@ -49,4 +49,37 @@ export class RequestsService {
     return request;
   }
   cancelOwned(customerId: string, id: string, reason: string) { return this.states.cancel(id, { type: 'CUSTOMER', id: customerId }, reason); }
+
+  async rateOwned(customerId: string, id: string, rating: number, review?: string) {
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new BadRequestException({ code: 'INVALID_RATING', message: 'Rating must be an integer from 1 to 5' });
+    if (review && review.length > 1000) throw new BadRequestException({ code: 'REVIEW_TOO_LONG', message: 'Review must not exceed 1000 characters' });
+    return this.prisma.$transaction(async (tx) => {
+      const [row] = await tx.$queryRaw<Array<{ status: RequestStatus; customer_id: string; provider_id: string | null; rating_customer_to_provider: number | null }>>`
+        SELECT status, customer_id, provider_id, rating_customer_to_provider FROM service_requests WHERE id=${id}::uuid FOR UPDATE`;
+      if (!row || row.customer_id !== customerId) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
+      if (row.status !== RequestStatus.COMPLETED || !row.provider_id) throw new BadRequestException({ code: 'RATING_NOT_ALLOWED', message: 'Only completed requests can be rated' });
+      if (row.rating_customer_to_provider !== null) throw new BadRequestException({ code: 'REQUEST_ALREADY_RATED', message: 'This request has already been rated' });
+      const provider = await tx.providerProfile.findUniqueOrThrow({ where: { userId: row.provider_id }, select: { ratingAvg: true, ratingCount: true } });
+      const nextCount = provider.ratingCount + 1;
+      const nextAverage = (provider.ratingAvg.toNumber() * provider.ratingCount + rating) / nextCount;
+      const request = await tx.serviceRequest.update({ where: { id }, data: { ratingCustomerToProvider: rating, reviewText: review?.trim() || null } });
+      await tx.providerProfile.update({ where: { userId: row.provider_id }, data: { ratingAvg: new Prisma.Decimal(nextAverage.toFixed(2)), ratingCount: nextCount } });
+      await tx.requestEvent.create({ data: { requestId: id, type: 'RATED', actorType: 'CUSTOMER', actorId: customerId, payload: { rating } } });
+      return request;
+    });
+  }
+
+  async disputeOwned(customerId: string, id: string, reason: string) {
+    const cleanReason = reason?.trim();
+    if (!cleanReason || cleanReason.length > 2000) throw new BadRequestException({ code: 'INVALID_DISPUTE_REASON', message: 'A dispute reason of at most 2000 characters is required' });
+    const request = await this.prisma.serviceRequest.findFirst({ where: { id, customerId } });
+    if (!request) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
+    if (!new Set<RequestStatus>([RequestStatus.COMPLETED, RequestStatus.CANCELLED]).has(request.status)) throw new BadRequestException({ code: 'DISPUTE_NOT_ALLOWED', message: 'A dispute can be opened after completion or cancellation' });
+    if (request.disputeFlag) throw new BadRequestException({ code: 'DISPUTE_ALREADY_OPEN', message: 'A dispute is already open for this request' });
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serviceRequest.update({ where: { id }, data: { disputeFlag: true, disputeReason: cleanReason, disputedAt: new Date() } });
+      await tx.requestEvent.create({ data: { requestId: id, type: 'DISPUTE', actorType: 'CUSTOMER', actorId: customerId, payload: { reason: cleanReason } } });
+      return updated;
+    });
+  }
 }

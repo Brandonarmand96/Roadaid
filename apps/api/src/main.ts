@@ -19,6 +19,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule, {
     cors: true,
+    rawBody: true,
   });
 
   // Prisma returns PostgreSQL BIGINT columns as bigint. JSON has no bigint
