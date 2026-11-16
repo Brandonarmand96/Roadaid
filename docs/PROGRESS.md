@@ -424,3 +424,42 @@ Phase 3 dispatch is now authorized.
 - Workspace lint: PASS; only the seven existing API unused-import warnings remain.
 - API and admin production builds: PASS.
 - Impeccable detector: PASS (no findings on the admin workspace).
+
+### Slice 5 — Paid-journey gate, receipts and realtime money safety — 16 Nov 2026
+
+- Replaced the broken `pnpm e2e:journey` target (which referenced a missing Jest configuration) with the specification-required HTTP + Socket.IO journey harness.
+- The harness creates isolated customer/provider identities, approves one provider for each service, dispatches and accepts sequential offers, records payment, completes each job, observes realtime updates, verifies provider release and asserts exact ledger reconciliation before cleaning up its data.
+- Added customer receipt details for completed requests: service, exact total, payment gateway/reference and Lagos-time completion timestamp.
+- Customer-owned request responses now include only that customer’s payment receipt metadata.
+- Added payment IDOR regressions proving customers cannot initialize or inspect payments belonging to another customer.
+- Added the mandatory webhook replay regression and a realtime regression for exact-safe Prisma `BigInt` serialization.
+- The live journey exposed Socket.IO attempting to serialize Prisma `BigInt` values during offer acceptance; realtime payload serialization is now centralized and uses the same exact-integer safety policy as REST responses.
+- Impeccable hardening guidance shaped the receipt hierarchy and long-reference handling; its detector reports no findings.
+
+### Slice 5 live gate evidence
+
+- `pnpm e2e:journey`: PASS.
+- FUEL: 1,050,000 kobo = 157,500 commission + 892,500 provider earning.
+- TOWING: 1,578,150 kobo = 236,722 commission + 1,341,428 provider earning.
+- LOCKOUT: 800,000 kobo = 120,000 commission + 680,000 provider earning.
+- Realtime: 18 `request.updated` events observed across the three journeys.
+- All three providers were released from `current_request_id` after completion; test identities and financial rows were removed by scoped cleanup.
+- API regression suite: PASS (65/65 across 13 suites).
+- Shared tests: PASS (4/4); workspace lint/typecheck and API/admin production builds: PASS.
+- Impeccable detector: PASS (no findings on the customer receipt surface).
+
+### Slice 6 — Provider authorization and physical-device gate hardening — 16 Nov 2026
+
+- Added explicit `PROVIDER` role enforcement to dispatch offers, provider job lifecycle, service onboarding mutations, availability and location ingestion routes; customer tokens can no longer invoke provider-only operations.
+- Kept provider profile creation available to authenticated users so the documented customer-to-provider onboarding transition remains possible.
+- Enforced the specification's maximum location-ingestion rate of one request per provider per second across single-point and batch endpoints, returning `429 LOCATION_RATE_LIMIT` before service work is performed.
+- Added authorization and throttling regressions proving a customer role is rejected and rapid repeated provider location calls are blocked.
+- Expanded `docs/DEVICE_TESTS.md` into the Phase 4 physical acceptance script covering locked-phone tracking, 30/120-second stale states, offline buffering and oldest-first replay, exact receipts/ledger reconciliation, wallet/payout behavior and battery-saver evidence.
+
+### Slice 6 verification
+
+- API regression suite: PASS (67/67 across 14 suites).
+- `pnpm e2e:journey`: PASS for FUEL, TOWING and LOCKOUT with exact integer-kobo reconciliation and 18 realtime updates.
+- Workspace typecheck: PASS (all six workspaces).
+- Workspace lint: PASS with no errors; six unrelated pre-existing unused-import warnings remain.
+- Phase 4 automated gates are green. The remaining acceptance item is execution and evidence capture for the physical-device cases in `docs/DEVICE_TESTS.md`.

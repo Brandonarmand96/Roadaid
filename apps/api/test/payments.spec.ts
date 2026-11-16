@@ -17,6 +17,7 @@ describe('PaymentsService', () => {
   const prisma: any = {
     payment: { findUnique: jest.fn(), update: jest.fn() },
     webhookEvent: { create: jest.fn(), deleteMany: jest.fn() },
+    serviceRequest: { findFirst: jest.fn() },
     $transaction: jest.fn((callback) => callback(tx)),
   };
   const gateway: any = { verify: jest.fn(), initialize: jest.fn() };
@@ -34,6 +35,17 @@ describe('PaymentsService', () => {
   it('rejects an invalid webhook signature', async () => {
     process.env.PAYSTACK_WEBHOOK_SECRET = 'test-secret';
     await expect(service.handlePaystack(Buffer.from('{}'), 'invalid')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('does not initialize payment for another customer request', async () => {
+    prisma.serviceRequest.findFirst.mockResolvedValue(null);
+    await expect(service.initialize('customer-2', 'request-1')).rejects.toThrow('Request not found');
+    expect(gateway.initialize).not.toHaveBeenCalled();
+  });
+
+  it('does not expose another customer payment status', async () => {
+    prisma.payment.findFirst = jest.fn().mockResolvedValue(null);
+    await expect(service.status('customer-2', 'RA-PAY-1')).rejects.toThrow('Payment not found');
   });
 
   it('rejects a verified amount mismatch without marking paid', async () => {

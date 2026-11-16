@@ -12,7 +12,7 @@ import {
   UploadedFile,
   HttpCode,
   HttpStatus,
-  Query,
+  HttpException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProvidersService } from './providers.service';
@@ -26,8 +26,11 @@ import {
   ProviderAvailabilityDto,
   locationUpdateSchema,
   LocationUpdateDto,
+  Role,
 } from '@roadaid/shared';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
@@ -38,8 +41,9 @@ const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
 ]);
 
 @Controller('provider')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ProvidersController {
+  private readonly lastLocationRequestAt = new Map<string, number>();
   constructor(private readonly providersService: ProvidersService) {}
 
   @Get('profile')
@@ -64,11 +68,13 @@ export class ProvidersController {
   }
 
   @Get('services')
+  @Roles(Role.PROVIDER)
   async getServices(@CurrentUser('id') userId: string) {
     return this.providersService.getServices(userId);
   }
 
   @Post('services')
+  @Roles(Role.PROVIDER)
   @HttpCode(HttpStatus.CREATED)
   async applyService(
     @CurrentUser('id') userId: string,
@@ -78,11 +84,13 @@ export class ProvidersController {
   }
 
   @Get('documents')
+  @Roles(Role.PROVIDER)
   async getDocuments(@CurrentUser('id') userId: string) {
     return this.providersService.getDocuments(userId);
   }
 
   @Post('documents')
+  @Roles(Role.PROVIDER)
   @UseInterceptors(FileInterceptor('file', {
     limits: { fileSize: MAX_DOCUMENT_BYTES, files: 1 },
     fileFilter: (_request, file, callback) => {
@@ -107,6 +115,7 @@ export class ProvidersController {
   }
 
   @Delete('documents/:id')
+  @Roles(Role.PROVIDER)
   @HttpCode(HttpStatus.OK)
   async deleteDocument(
     @CurrentUser('id') userId: string,
@@ -116,12 +125,14 @@ export class ProvidersController {
   }
 
   @Post('submit')
+  @Roles(Role.PROVIDER)
   @HttpCode(HttpStatus.OK)
   async submitApplication(@CurrentUser('id') userId: string) {
     return this.providersService.submitApplication(userId);
   }
 
   @Post('availability')
+  @Roles(Role.PROVIDER)
   @HttpCode(HttpStatus.OK)
   async setAvailability(
     @CurrentUser('id') userId: string,
@@ -131,17 +142,28 @@ export class ProvidersController {
   }
 
   @Post('location')
+  @Roles(Role.PROVIDER)
   @HttpCode(HttpStatus.OK)
   async updateLocation(
     @CurrentUser('id') providerId: string,
     @Body(new ZodValidationPipe(locationUpdateSchema)) dto: LocationUpdateDto,
   ) {
+    this.enforceLocationRate(providerId);
     return this.providersService.updateLocation(providerId, dto);
   }
 
   @Post('location/batch')
+  @Roles(Role.PROVIDER)
   @HttpCode(HttpStatus.OK)
   async updateLocationBatch(@CurrentUser('id') providerId: string, @Body() body: { points: LocationUpdateDto[] }) {
+    this.enforceLocationRate(providerId);
     return this.providersService.updateLocationBatch(providerId, body.points);
+  }
+
+  private enforceLocationRate(providerId: string) {
+    const now = Date.now();
+    const previous = this.lastLocationRequestAt.get(providerId) || 0;
+    if (now - previous < 1000) throw new HttpException({ code: 'LOCATION_RATE_LIMIT', message: 'Location updates are limited to one request per second' }, HttpStatus.TOO_MANY_REQUESTS);
+    this.lastLocationRequestAt.set(providerId, now);
   }
 }

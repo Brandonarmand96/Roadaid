@@ -42,9 +42,9 @@ export class RequestsService {
     return this.getOwned(customerId, id);
   }
 
-  listOwned(customerId: string) { return this.prisma.serviceRequest.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' }, include: { provider: { select: { fullName: true, phone: true } }, events: { orderBy: { createdAt: 'asc' } } } }); }
+  listOwned(customerId: string) { return this.prisma.serviceRequest.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' }, include: { provider: { select: { fullName: true, phone: true } }, payments: { select: { reference: true, gateway: true, status: true, paidAt: true }, orderBy: { createdAt: 'desc' } }, events: { orderBy: { createdAt: 'asc' } } } }); }
   async getOwned(customerId: string, id: string) {
-    const request = await this.prisma.serviceRequest.findFirst({ where: { id, customerId }, include: { provider: { select: { fullName: true, phone: true } }, events: { orderBy: { createdAt: 'asc' } } } });
+    const request = await this.prisma.serviceRequest.findFirst({ where: { id, customerId }, include: { provider: { select: { fullName: true, phone: true } }, payments: { select: { reference: true, gateway: true, status: true, paidAt: true }, orderBy: { createdAt: 'desc' } }, events: { orderBy: { createdAt: 'asc' } } } });
     if (!request) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
     return request;
   }

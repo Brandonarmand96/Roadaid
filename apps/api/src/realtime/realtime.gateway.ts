@@ -11,6 +11,7 @@ import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
+import { jsonBigIntReplacer } from '../common/utils/json-bigint';
 
 interface JwtPayload {
   userId: string;
@@ -86,8 +87,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   // Helper emitter methods
+  private serializable(payload: unknown) {
+    return payload === undefined ? undefined : JSON.parse(JSON.stringify(payload, jsonBigIntReplacer));
+  }
   emitOfferNew(providerId: string, payload: unknown) {
-    this.server.to(`user:${providerId}`).emit('offer.new', payload);
+    this.server.to(`user:${providerId}`).emit('offer.new', this.serializable(payload));
   }
 
   emitOfferExpired(providerId: string, offerId: string) {
@@ -99,11 +103,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   emitRequestUpdated(requestId: string, payload: unknown) {
-    this.server.to(`request:${requestId}`).to('admin').emit('request.updated', payload);
+    this.server.to(`request:${requestId}`).to('admin').emit('request.updated', this.serializable(payload));
   }
 
   emitProviderLocation(requestId: string, payload: unknown) {
-    this.server.to(`request:${requestId}`).to('admin').emit('provider.location', payload);
+    this.server.to(`request:${requestId}`).to('admin').emit('provider.location', this.serializable(payload));
   }
 
   emitRequestEta(requestId: string, etaSeconds: number) {
@@ -119,6 +123,6 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   emitNotification(userId: string, payload: unknown) {
-    this.server.to(`user:${userId}`).emit('notification.new', payload);
+    this.server.to(`user:${userId}`).emit('notification.new', this.serializable(payload));
   }
 }

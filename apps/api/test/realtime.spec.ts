@@ -25,4 +25,12 @@ describe('RealtimeGateway request room authorization', () => {
     await expect(gateway.handleJoinRequest(admin, { requestId: 'request-1' })).resolves.toEqual({ success: true, room: 'request:request-1' });
     expect(prisma.serviceRequest.findFirst).not.toHaveBeenCalled();
   });
+
+  it('serializes exact safe bigint values before emitting request updates', () => {
+    const emit = jest.fn();
+    const chain = { to: jest.fn().mockReturnThis(), emit };
+    (gateway as any).server = { to: jest.fn(() => chain) };
+    gateway.emitRequestUpdated('request-1', { priceKobo: 1050000n });
+    expect(emit).toHaveBeenCalledWith('request.updated', { priceKobo: 1050000 });
+  });
 });

@@ -3,9 +3,13 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { DispatchService } from './dispatch.service';
 import { RequestStatus } from '@prisma/client';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '@roadaid/shared';
 
 @Controller('provider/offers')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.PROVIDER)
 export class DispatchController {
   constructor(private readonly dispatch: DispatchService) {}
   @Get() pending(@CurrentUser('id') providerId: string) { return this.dispatch.pendingOffers(providerId); }
@@ -14,7 +18,8 @@ export class DispatchController {
 }
 
 @Controller('provider/jobs')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.PROVIDER)
 export class ProviderJobsController {
   constructor(private readonly dispatch: DispatchService) {}
   @Get('current') currentJob(@CurrentUser('id') providerId: string) { return this.dispatch.currentJob(providerId); }
