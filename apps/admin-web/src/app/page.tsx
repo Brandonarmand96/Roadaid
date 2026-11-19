@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import {
   Check,
   ChevronRight,
@@ -357,7 +358,7 @@ export default function AdminHomePage() {
 
   if (!token)
     return (
-      <main className="min-h-screen bg-[#101827] text-slate-100 grid place-items-center p-6">
+      <main className="min-h-screen bg-[#191D23] text-slate-100 grid place-items-center p-6">
         <form onSubmit={login} className="w-full max-w-md">
           <div className="flex items-center gap-3 mb-10">
             <BrandMark />
@@ -392,7 +393,7 @@ export default function AdminHomePage() {
             />
             <button
               disabled={busy}
-              className="w-full h-14 rounded-[14px] bg-amber-400 text-[#101827] font-black disabled:opacity-50 focus:outline-none focus:ring-4 focus:ring-amber-200/30"
+              className="w-full h-14 rounded-[14px] bg-[#F4AE3E] text-[#191D23] font-black disabled:opacity-50 focus:outline-none focus:ring-4 focus:ring-[#F4AE3E]/30"
             >
               {busy ? "Signing in…" : "Sign in to Operations"}
             </button>
@@ -403,7 +404,7 @@ export default function AdminHomePage() {
 
   return (
     <main className="min-h-screen bg-[#f5f1e8] text-slate-900">
-      <header className="h-[76px] bg-[#101827] text-white px-6 flex items-center justify-between border-b border-slate-700">
+      <header className="h-20 bg-[#191D23] text-white px-6 flex items-center justify-between border-b border-[#363B44]">
         <div className="flex items-center gap-3">
           <BrandMark />
           <div>
@@ -458,7 +459,7 @@ export default function AdminHomePage() {
         {error && <ErrorMessage message={error} />}
         {adminRole !== "FINANCE" && <>
         {live && (
-          <section className="mb-8 grid xl:grid-cols-[1.6fr_0.9fr] bg-[#101827] text-white rounded-2xl overflow-hidden">
+          <section className="mb-8 grid xl:grid-cols-[1.6fr_0.9fr] bg-[#191D23] text-white rounded-2xl overflow-hidden">
             <div className="min-h-[390px] bg-slate-200">
               {process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ? (
                 <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY}>
@@ -693,7 +694,7 @@ export default function AdminHomePage() {
               <div className="p-5 border-b border-[#d8d2c5] flex items-center justify-between gap-4"><div><h3 className="font-black">Provider payouts</h3><p className="text-sm text-slate-500">Manual bank transfers with audited approval.</p></div><Action label="Payout CSV" onClick={() => void downloadReport("payouts")} /></div>
               <div className="divide-y divide-[#e4ded3] max-h-[520px] overflow-y-auto">{payouts.length ? payouts.map((payout) => <div key={payout.id} className="p-5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="font-black truncate">{payout.provider.user.fullName || payout.provider.user.phone}</p><p className="text-xs text-slate-500 mt-1">Requested {new Date(payout.requestedAt).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}</p></div><div className="text-right shrink-0"><p className="font-black tabular-nums">{money(payout.amountKobo)}</p><Status value={payout.status} /></div></div><div className="flex flex-wrap gap-2 mt-4">{payout.status === "REQUESTED" && <><Action label="Approve" onClick={() => void decidePayout(payout.id, true)} /><Action label="Reject" tone="danger" onClick={() => void decidePayout(payout.id, false)} /></>}{payout.status === "APPROVED" && <Action label="Record bank transfer" onClick={() => void markPayoutPaid(payout.id)} />}</div></div>) : <EmptyMessage title="No payout requests" body="Provider payout requests will appear here for review." />}</div>
             </div>
-            <div className="xl:col-span-2 flex flex-wrap items-end gap-3 p-5 bg-[#101827] text-white rounded-2xl"><Download size={18} className="text-amber-300 self-center" /><p className="font-black mr-auto self-center">Operational reports</p><label className="text-xs font-bold"><span className="block mb-1 text-slate-300">From</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} className="h-10 rounded-xl bg-slate-900 border border-slate-600 px-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-300" /></label><label className="text-xs font-bold"><span className="block mb-1 text-slate-300">To</span><input type="date" value={reportTo} min={reportFrom || undefined} onChange={(event) => setReportTo(event.target.value)} className="h-10 rounded-xl bg-slate-900 border border-slate-600 px-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-300" /></label><Action label="Requests CSV" onClick={() => void downloadReport("requests")} /><Action label="Providers CSV" onClick={() => void downloadReport("providers")} /></div>
+            <div className="xl:col-span-2 flex flex-wrap items-end gap-3 p-5 bg-[#191D23] text-white rounded-2xl"><Download size={18} className="text-[#F4AE3E] self-center" /><p className="font-black mr-auto self-center">Operational reports</p><label className="text-xs font-bold"><span className="block mb-1 text-slate-300">From</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} className="h-10 rounded-xl bg-[#252A32] border border-slate-600 px-3 text-white focus:outline-none focus:ring-2 focus:ring-[#F4AE3E]" /></label><label className="text-xs font-bold"><span className="block mb-1 text-slate-300">To</span><input type="date" value={reportTo} min={reportFrom || undefined} onChange={(event) => setReportTo(event.target.value)} className="h-10 rounded-xl bg-[#252A32] border border-slate-600 px-3 text-white focus:outline-none focus:ring-2 focus:ring-[#F4AE3E]" /></label><Action label="Requests CSV" onClick={() => void downloadReport("requests")} /><Action label="Providers CSV" onClick={() => void downloadReport("providers")} /></div>
           </section>
         )}
       </div>
@@ -854,9 +855,13 @@ function ProviderDetail({
 }
 function BrandMark() {
   return (
-    <div className="w-10 h-10 rounded-xl bg-amber-400 text-[#101827] grid place-items-center font-black">
-      RA
-    </div>
+    <Image
+      src="/roadaid-mark.svg"
+      alt=""
+      width={44}
+      height={44}
+      className="w-11 h-11 shrink-0 object-contain"
+    />
   );
 }
 function Field({

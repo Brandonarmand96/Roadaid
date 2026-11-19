@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="title">
+  <title id="title">RoadAid</title>
+  <path d="M256 20C189 77 119 91 51 108v133c0 118 72 214 205 261 133-47 205-143 205-261V108C393 91 323 77 256 20Z" stroke="#171B1F" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M256 27C193 83 122 100 59 115v125c0 109 68 199 197 245 129-46 197-136 197-245V115C390 100 319 83 256 27Z" fill="#191D23" stroke="#F4AE3E" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M111 367c45-43 91-59 141-81 31-14 57-28 73-57 25 2 64 22 79 61 18 51-5 100-37 137-25 27-58 45-111 69 57-52 87-103 91-152 3-26-11-52-36-65-57 48-126 56-200 111Z" fill="#F4AE3E"/>
+  <path d="M168 447c24-58 66-91 105-114 42-25 78-39 77-75-1-18-13-34-30-43 18 2 48 22 60 46 22 45 3 111-52 166L255 481Z" fill="#191D23"/>
+  <path d="M325 252l8 12M336 277l6 16M335 305l-4 19M317 335l-13 17M288 363l-16 19M252 392l-21 22" stroke="#F4AE3E" stroke-width="9" stroke-linecap="round"/>
+  <path d="M256 93c-44 0-80 36-80 80 0 56 80 137 80 137s80-81 80-137c0-44-36-80-80-80Z" fill="#F4AE3E" stroke="#D38A1C" stroke-width="3"/>
+  <circle cx="256" cy="174" r="51" fill="#191D23"/>
+  <path d="M246 143h20l-4 45h-12l-4-45Z" fill="white"/>
+  <circle cx="256" cy="202" r="8" fill="white"/>
+</svg>

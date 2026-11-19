@@ -4,6 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'RoadAid Operations Dashboard',
   description: 'RoadAid roadside assistance administrative and dispatch console',
+  icons: { icon: '/roadaid-mark.svg' },
 };
 
 export default function RootLayout({

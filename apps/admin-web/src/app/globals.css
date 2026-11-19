@@ -3,22 +3,38 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 248, 250, 252;
-  --background-end-rgb: 255, 255, 255;
+  --roadaid-amber: #f4ae3e;
+  --roadaid-green: #64cf99;
+  --roadaid-ink: #191d23;
+  --roadaid-surface: #252a32;
+  --roadaid-canvas: #f6f7f5;
+  --roadaid-muted: #6b7280;
+  --roadaid-danger: #ec6969;
+  --foreground-rgb: 25, 29, 35;
+  --background-start-rgb: 246, 247, 245;
+  --background-end-rgb: 246, 247, 245;
 }
 
 body {
   color: rgb(var(--foreground-rgb));
   background: rgb(var(--background-start-rgb));
   min-height: 100vh;
+  accent-color: var(--roadaid-amber);
 }
 
 ::selection {
-  background: #f4b942;
-  color: #101827;
+  background: var(--roadaid-amber);
+  color: var(--roadaid-ink);
 }
 
 button, input, a {
-  caret-color: #d48428;
+  caret-color: #d38a1c;
+}
+
+:focus-visible {
+  outline-color: var(--roadaid-amber);
+}
+
+* {
+  scrollbar-color: #d38a1c var(--roadaid-canvas);
 }

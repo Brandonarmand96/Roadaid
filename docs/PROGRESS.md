@@ -463,3 +463,11 @@ Phase 3 dispatch is now authorized.
 - Workspace typecheck: PASS (all six workspaces).
 - Workspace lint: PASS with no errors; six unrelated pre-existing unused-import warnings remain.
 - Phase 4 automated gates are green. The remaining acceptance item is execution and evidence capture for the physical-device cases in `docs/DEVICE_TESTS.md`.
+
+### Cross-surface brand integration — 19 Nov 2026
+
+- Adopted the V2 RoadAid shield, route and location-pin mark across the customer app, provider app and admin dashboard.
+- Replaced the temporary `RA` monograms with the real brand asset and configured it for both Expo launcher icons and Android adaptive icons.
+- Standardised the V2 palette across all three interfaces: amber `#F4AE3E`, green `#64CF99`, ink `#191D23`, dark surface `#252A32`, canvas `#F6F7F5`, muted `#6B7280` and danger `#EC6969`.
+- Preserved all existing product flows, dispatch behavior and the frozen three-service scope.
+- Customer/provider lint and typecheck pass; Expo resolves both app-icon configurations; admin lint, typecheck and production build pass; the Impeccable detector reports no mechanical findings.

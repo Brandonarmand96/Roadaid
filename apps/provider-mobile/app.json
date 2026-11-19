@@ -3,6 +3,7 @@
     "name": "RoadAid Provider",
     "slug": "roadaid-provider",
     "version": "1.0.0",
+    "icon": "./assets/roadaid-mark.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
@@ -19,7 +20,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0B132B"
+        "foregroundImage": "./assets/roadaid-mark.png",
+        "backgroundColor": "#191D23"
       },
       "package": "co.roadaid.provider",
       "permissions": [

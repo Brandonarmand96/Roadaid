@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -283,7 +284,7 @@ export default function App() {
         distanceInterval: active ? 10 : 100,
         pausesUpdatesAutomatically: false,
         showsBackgroundLocationIndicator: active,
-        foregroundService: { notificationTitle: "RoadAid: You’re online", notificationBody: active ? "Sharing live location for your active job" : "Ready to receive nearby roadside requests", notificationColor: "#F4B942" },
+        foregroundService: { notificationTitle: "RoadAid: You’re online", notificationBody: active ? "Sharing live location for your active job" : "Ready to receive nearby roadside requests", notificationColor: "#F4AE3E" },
       });
       setTrackingState(active ? "ACTIVE" : "IDLE");
       await flushLocationBuffer(token);
@@ -533,9 +534,7 @@ export default function App() {
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" />
       <View style={s.header}>
-        <View style={s.logo}>
-          <Text style={s.logoText}>RA</Text>
-        </View>
+        <Image source={require("./assets/roadaid-mark.png")} style={s.logo} resizeMode="contain" accessibilityIgnoresInvertColors />
         <View>
           <Text style={s.brand}>RoadAid Partner</Text>
           <Text style={s.tagline}>BUILT FOR CERTAINTY</Text>
@@ -955,7 +954,7 @@ function Button({
       style={[s.button, (busy || disabled) && s.disabled]}
     >
       {busy ? (
-        <ActivityIndicator color="#101827" />
+        <ActivityIndicator color="#191D23" />
       ) : (
         <Text style={s.buttonText}>{label}</Text>
       )}
@@ -1041,33 +1040,28 @@ function Notice({
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#101827" },
+  safe: { flex: 1, backgroundColor: "#191D23" },
   header: {
-    height: 76,
+    height: 80,
     paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#293449",
+    borderBottomColor: "#363B44",
   },
   logo: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: "#F4B942",
-    alignItems: "center",
-    justifyContent: "center",
+    width: 44,
+    height: 44,
   },
-  logoText: { color: "#101827", fontWeight: "900" },
-  brand: { color: "#F8FAFC", fontSize: 17, fontWeight: "900" },
+  brand: { color: "#FFFFFF", fontSize: 17, fontWeight: "900" },
   tagline: {
-    color: "#F4B942",
+    color: "#F4AE3E",
     fontSize: 9,
     fontWeight: "900",
     letterSpacing: 1.4,
   },
-  page: { flexGrow: 1, backgroundColor: "#F5F1E8", padding: 20 },
+  page: { flexGrow: 1, backgroundColor: "#F6F7F5", padding: 20 },
   screen: {
     flex: 1,
     justifyContent: "center",
@@ -1076,7 +1070,7 @@ const s = StyleSheet.create({
     alignSelf: "center",
   },
   title: {
-    color: "#172033",
+    color: "#191D23",
     fontSize: 30,
     lineHeight: 36,
     fontWeight: "900",
@@ -1106,24 +1100,24 @@ const s = StyleSheet.create({
     borderColor: "#C8C1B4",
     borderRadius: 14,
     paddingHorizontal: 15,
-    color: "#172033",
-    backgroundColor: "#FFFCF5",
+    color: "#191D23",
+    backgroundColor: "#FFFFFF",
     fontSize: 16,
   },
   row: { flexDirection: "row", gap: 12 },
   flex: { flex: 1 },
   button: {
     minHeight: 54,
-    backgroundColor: "#F4B942",
+    backgroundColor: "#F4AE3E",
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 4,
   },
   disabled: { opacity: 0.45 },
-  buttonText: { color: "#101827", fontWeight: "900", fontSize: 15 },
+  buttonText: { color: "#191D23", fontWeight: "900", fontSize: 15 },
   link: { minHeight: 44, alignItems: "center", justifyContent: "center" },
-  linkText: { color: "#754713", fontWeight: "800" },
+  linkText: { color: "#83520F", fontWeight: "800" },
   legal: {
     color: "#687386",
     fontSize: 12,
@@ -1138,9 +1132,9 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#C8C1B4",
     borderRadius: 14,
-    backgroundColor: "#FFFCF5",
+    backgroundColor: "#FFFFFF",
   },
-  selected: { borderColor: "#9D5B13", backgroundColor: "#FFF1CF" },
+  selected: { borderColor: "#D38A1C", backgroundColor: "#FFF0CC" },
   box: {
     width: 24,
     height: 24,
@@ -1150,10 +1144,10 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  checked: { backgroundColor: "#9D5B13", borderColor: "#9D5B13" },
+  checked: { backgroundColor: "#D38A1C", borderColor: "#D38A1C" },
   tick: { color: "#FFFFFF", fontWeight: "900" },
-  choiceTitle: { color: "#172033", fontWeight: "900", fontSize: 15 },
-  muted: { color: "#667185", fontSize: 12, lineHeight: 18 },
+  choiceTitle: { color: "#191D23", fontWeight: "900", fontSize: 15 },
+  muted: { color: "#6B7280", fontSize: 12, lineHeight: 18 },
   upload: {
     flexDirection: "row",
     alignItems: "center",
@@ -1170,7 +1164,7 @@ const s = StyleSheet.create({
     borderRadius: 12,
     justifyContent: "center",
   },
-  outlineText: { color: "#754713", fontWeight: "900" },
+  outlineText: { color: "#83520F", fontWeight: "900" },
   summary: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1180,14 +1174,14 @@ const s = StyleSheet.create({
     borderBottomColor: "#D8D2C5",
   },
   summaryValue: {
-    color: "#172033",
+    color: "#191D23",
     fontWeight: "900",
     flex: 1,
     textAlign: "right",
   },
   notice: { backgroundColor: "#E5EDF3", borderRadius: 14, padding: 15 },
   warning: { backgroundColor: "#FFEBC1" },
-  noticeTitle: { color: "#172033", fontWeight: "900" },
+  noticeTitle: { color: "#191D23", fontWeight: "900" },
   noticeBody: { color: "#4F5C70", marginTop: 5, lineHeight: 19 },
   section: {
     color: "#677286",
