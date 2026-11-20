@@ -9,7 +9,7 @@ import { Role } from '@roadaid/shared';
 
 @Controller('payments')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.CUSTOMER)
+@Roles(Role.CUSTOMER, Role.PROVIDER)
 export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
   @Post('initialize') initialize(@CurrentUser('id') customerId: string, @Body('requestId') requestId: string) { return this.payments.initialize(customerId, requestId); }

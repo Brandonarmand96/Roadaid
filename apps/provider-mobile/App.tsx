@@ -19,8 +19,9 @@ import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import * as TaskManager from "expo-task-manager";
-import { OnboardingStatus, ServiceType } from "@roadaid/shared";
+import { OnboardingStatus, Role, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
+import CustomerExperience from "./CustomerExperience";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_EAS_PROJECT_ID?: string } };
 
@@ -66,6 +67,9 @@ type Profile = {
   documents: Document[];
 };
 type Session = { accessToken: string; refreshToken: string };
+type AuthSession = Session & { isNewUser: boolean; user: { role: Role } };
+type AccountIntent = "CUSTOMER" | "PROVIDER";
+type AppMode = "CUSTOMER" | "PROVIDER";
 type Offer = {
   id: string;
   expiresAt: string;
@@ -89,6 +93,15 @@ type Job = {
 
 let currentSession: Session | undefined;
 let refreshInFlight: Promise<Session> | undefined;
+
+function roleFromToken(token: string): Role | undefined {
+  try {
+    const encoded = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "="))).role as Role;
+  } catch {
+    return undefined;
+  }
+}
 
 async function readLocationBuffer(): Promise<LocationPoint[]> {
   try { return JSON.parse(await SecureStore.getItemAsync(LOCATION_BUFFER_KEY) || "[]") as LocationPoint[]; }
@@ -221,6 +234,10 @@ export default function App() {
   const [bank, setBank] = useState({ bankName: "", accountNumber: "", accountName: "" });
   const [payoutNaira, setPayoutNaira] = useState("");
   const [trackingState, setTrackingState] = useState<"OFF" | "IDLE" | "ACTIVE">("OFF");
+  const [role, setRole] = useState<Role>();
+  const [intent, setIntent] = useState<AccountIntent>("CUSTOMER");
+  const [mode, setMode] = useState<AppMode>("CUSTOMER");
+  const [newProviderEnrollment, setNewProviderEnrollment] = useState(false);
   const [form, setForm] = useState({
     businessName: "",
     address: "",
@@ -237,7 +254,14 @@ export default function App() {
       if (accessToken && refreshToken) {
         currentSession = { accessToken, refreshToken };
         setToken(accessToken);
-        void load(accessToken);
+        const storedRole = roleFromToken(accessToken);
+        setRole(storedRole);
+        if (storedRole === Role.PROVIDER) {
+          setMode("PROVIDER");
+          void load(accessToken);
+        } else {
+          setMode("CUSTOMER");
+        }
       }
     });
   }, []);
@@ -292,16 +316,16 @@ export default function App() {
     void configure().catch(() => setTrackingState("OFF"));
   }, [token, profile?.onboardingStatus, profile?.availability, job?.status]);
   useEffect(() => {
-    if (!token || !process.env.EXPO_PUBLIC_EAS_PROJECT_ID) return;
+    if (!token || !role || !process.env.EXPO_PUBLIC_EAS_PROJECT_ID) return;
     const register = async () => {
       if (Platform.OS === "android") await Notifications.setNotificationChannelAsync("offers", { name: "RoadAid offers", importance: Notifications.AndroidImportance.MAX, vibrationPattern: [0, 300, 150, 300], sound: "default" });
       const permission = await Notifications.requestPermissionsAsync();
       if (!permission.granted) return;
       const push = await Notifications.getExpoPushTokenAsync({ projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID });
-      await request("/devices", { method: "POST", body: JSON.stringify({ platform: Platform.OS === "ios" ? "IOS" : "ANDROID", token: push.data, app: "PROVIDER" }) }, token);
+      await request("/devices", { method: "POST", body: JSON.stringify({ platform: Platform.OS === "ios" ? "IOS" : "ANDROID", token: push.data, app: role === Role.PROVIDER ? "PROVIDER" : "CUSTOMER" }) }, token);
     };
     void register().catch(() => undefined);
-  }, [token]);
+  }, [role, token]);
   useEffect(() => {
     if (!token || profile?.onboardingStatus !== OnboardingStatus.APPROVED) return;
     const socket = io(API.replace(/\/v1$/, ""), { auth: { token }, transports: ["websocket", "polling"] });
@@ -362,13 +386,32 @@ export default function App() {
   }
   async function verify() {
     await act(async () => {
-      const auth = await request<Session>("/auth/otp/verify", {
+      const auth = await request<AuthSession>("/auth/otp/verify", {
         method: "POST",
         body: JSON.stringify({ phone, code }),
       });
       await saveSession(auth);
       setToken(auth.accessToken);
-      await load(auth.accessToken);
+      setRole(auth.user.role);
+      if (auth.user.role === Role.PROVIDER) {
+        setMode(intent);
+        if (intent === "PROVIDER") await load(auth.accessToken);
+        else setStep("status");
+        return;
+      }
+      if (intent === "PROVIDER") {
+        if (!auth.isNewUser) {
+          setMode("CUSTOMER");
+          setStep("status");
+          throw new Error("This number belongs to a customer account. Customer accounts cannot be converted into provider accounts.");
+        }
+        setNewProviderEnrollment(true);
+        setMode("PROVIDER");
+        setStep("profile");
+        return;
+      }
+      setMode("CUSTOMER");
+      setStep("status");
     });
   }
   async function saveProfile() {
@@ -379,6 +422,12 @@ export default function App() {
         { method: "PUT", body: JSON.stringify(form) },
         token,
       );
+      if (newProviderEnrollment) {
+        const refreshed = await refreshSession();
+        setToken(refreshed.accessToken);
+        setRole(Role.PROVIDER);
+        setNewProviderEnrollment(false);
+      }
       setStep("services");
     });
   }
@@ -528,6 +577,20 @@ export default function App() {
     });
   }
 
+  async function signOut() {
+    await clearSession();
+    setToken(undefined);
+    setRole(undefined);
+    setProfile(undefined);
+    setMode("CUSTOMER");
+    setStep("phone");
+    setError("");
+  }
+
+  if (token && mode === "CUSTOMER") {
+    return <CustomerExperience accessToken={token} apiRequest={request} notice={error} onSignOut={() => void signOut()} onSessionExpired={() => void signOut()} onProviderMode={role === Role.PROVIDER ? () => { setError(""); setMode("PROVIDER"); void load(token); } : undefined} />;
+  }
+
   const sequence: Step[] = ["profile", "services", "documents", "review"];
   const position = sequence.indexOf(step) + 1;
   return (
@@ -536,7 +599,7 @@ export default function App() {
       <View style={s.header}>
         <Image source={require("./assets/roadaid-mark.png")} style={s.logo} resizeMode="contain" accessibilityIgnoresInvertColors />
         <View>
-          <Text style={s.brand}>RoadAid Partner</Text>
+          <Text style={s.brand}>RoadAid</Text>
           <Text style={s.tagline}>BUILT FOR CERTAINTY</Text>
         </View>
       </View>
@@ -544,6 +607,9 @@ export default function App() {
         contentContainerStyle={s.page}
         keyboardShouldPersistTaps="handled"
       >
+        {token && role === Role.PROVIDER ? (
+          <><Link label="Switch to Customer mode" onPress={() => setMode("CUSTOMER")} /><Link label="Sign out" onPress={() => void signOut()} /></>
+        ) : null}
         {position > 0 && (
           <View style={s.progress}>
             <Text style={s.muted}>Application step {position} of 4</Text>
@@ -557,9 +623,21 @@ export default function App() {
         ) : null}
         {step === "phone" && (
           <Screen
-            title="Start earning with RoadAid"
-            intro="Join Abuja’s verified roadside response network."
+            title="How will you use RoadAid?"
+            intro="Choose Customer for roadside help, or Provider to join Abuja’s verified response network."
           >
+            <Choice
+              label="Customer"
+              detail="Request fuel, towing, or lockout assistance"
+              selected={intent === "CUSTOMER"}
+              onPress={() => setIntent("CUSTOMER")}
+            />
+            <Choice
+              label="Provider"
+              detail="Register or sign in to respond to roadside requests"
+              selected={intent === "PROVIDER"}
+              onPress={() => setIntent("PROVIDER")}
+            />
             <Field
               label="Mobile number"
               value={phone}
@@ -568,8 +646,8 @@ export default function App() {
             />
             <Button label="Send secure code" onPress={sendOtp} busy={busy} />
             <Text style={s.legal}>
-              Continuing permits identity and location verification for provider
-              operations.
+              Provider registration is available only when creating a new account.
+              Existing providers can use both modes.
             </Text>
           </Screen>
         )}
@@ -970,10 +1048,12 @@ function Link({ label, onPress }: { label: string; onPress: () => void }) {
 }
 function Choice({
   label,
+  detail,
   selected,
   onPress,
 }: {
   label: string;
+  detail?: string;
   selected: boolean;
   onPress: () => void;
 }) {
@@ -986,7 +1066,7 @@ function Choice({
         <Text style={s.choiceTitle}>
           {label[0] + label.slice(1).toLowerCase()}
         </Text>
-        <Text style={s.muted}>Apply for separate Operations approval</Text>
+        <Text style={s.muted}>{detail ?? "Apply for separate Operations approval"}</Text>
       </View>
     </Pressable>
   );

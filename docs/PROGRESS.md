@@ -464,6 +464,20 @@ Phase 3 dispatch is now authorized.
 - Workspace lint: PASS with no errors; six unrelated pre-existing unused-import warnings remain.
 - Phase 4 automated gates are green. The remaining acceptance item is execution and evidence capture for the physical-device cases in `docs/DEVICE_TESTS.md`.
 
+### Slice 7 — Admin session-expiry hardening — 19 Nov 2026
+
+- Fixed the admin dashboard restoring an expired JWT from browser storage and continuing to render protected surfaces with failed data requests.
+- Admin JWT metadata is now validated before session restoration; malformed or expired tokens are removed before any dashboard request is made.
+- Active sessions now end at the token's server-issued `exp` time, and every authenticated API `401` (including CSV reports) centrally clears the session and protected dashboard data.
+- Expired sessions return to the sign-in screen with a specific recovery message instead of showing an authenticated dashboard with `JWT token verification failed or expired`.
+
+### Slice 7 verification
+
+- Admin lint: PASS with no warnings or errors.
+- Admin typecheck: PASS.
+- Admin production build: PASS.
+- Impeccable detector: PASS (no findings on the changed session and error-state surface).
+
 ### Cross-surface brand integration — 19 Nov 2026
 
 - Adopted the V2 RoadAid shield, route and location-pin mark across the customer app, provider app and admin dashboard.
@@ -471,3 +485,39 @@ Phase 3 dispatch is now authorized.
 - Standardised the V2 palette across all three interfaces: amber `#F4AE3E`, green `#64CF99`, ink `#191D23`, dark surface `#252A32`, canvas `#F6F7F5`, muted `#6B7280` and danger `#EC6969`.
 - Preserved all existing product flows, dispatch behavior and the frozen three-service scope.
 - Customer/provider lint and typecheck pass; Expo resolves both app-icon configurations; admin lint, typecheck and production build pass; the Impeccable detector reports no mechanical findings.
+
+### Approved scope change — unified RoadAid mobile app — 19 Nov 2026
+
+- Replaced the separate shipping-app model with one Expo workspace package named `mobile`, using the existing provider-capable native project so background location, notifications and EAS development builds remain available.
+- Added a unified entry choice for Customer or Provider use. New identities may select provider registration during their first authenticated session; an established Customer account cannot self-promote.
+- Provider accounts can switch between Provider and Customer modes without a second login. Customer accounts never receive the Provider-mode switch or provider operations.
+- Moved the complete customer request, tracking, payment, receipt, rating and dispute experience into the unified app and connected it to the same rotating mobile session used by Provider mode.
+- Expanded customer API authorization to `PROVIDER` accounts while retaining ownership checks. Realtime request rooms now authorize a provider as either the request's customer or assigned provider.
+- Provider accounts must be offline and have no active provider job before creating a customer request, preserving safe availability behavior and the one-active-job invariant.
+- Push registration now records the account's authoritative role, and provider background-location permissions are still requested only when going online in Provider mode.
+- Renamed the Expo display app and slug to `RoadAid` / `roadaid`. The existing provider bundle identifiers and EAS project are retained as the upgrade path; the legacy customer source is retained temporarily but excluded from the pnpm workspace and all build gates.
+- Updated `SPEC.md`, `PRODUCT.md`, `docs/DECISIONS.md`, `README.md` and the physical-device test instructions for the approved asymmetric role model.
+
+### Unified-app verification
+
+- Workspace lint: PASS across five packages; only five unrelated pre-existing API unused-import warnings remain.
+- Workspace typecheck: PASS across all five active packages.
+- API/shared tests: PASS (72 API + 4 shared), including provider access to customer capabilities, realtime dual ownership, first-session provider enrollment and established-customer conversion rejection.
+- Expo public configuration resolves the unified `RoadAid` app with provider background-location capabilities.
+- `pnpm e2e:journey`: PASS for FUEL, TOWING and LOCKOUT with exact integer-kobo ledger reconciliation and 18 realtime updates.
+- Remaining acceptance work: install the unified EAS development build on both physical phones and rerun the updated role-switch plus locked-phone/offline matrix in `docs/DEVICE_TESTS.md`.
+
+### Client-requested active-service experience — 19 Nov 2026
+
+- Added service-specific customer language and vector visuals: dispatch rider/motorcycle for FUEL, tow operator/tow truck for TOWING and roadside technician/tools for LOCKOUT, while retaining the single secured provider domain role.
+- Reworked assigned and active requests around the supplied interaction reference using RoadAid's own visual system: service headline, ETA, seven-step progress strip, responder identity, one-tap phone action and live map.
+- Added pickup coordinates to customer-owned request responses so restored requests can render both the customer and responder markers without trusting stale client state.
+- Added explicit live, delayed (>30 seconds) and disconnected (>120 seconds) map states and preserved the existing payment, cancellation, receipt, rating and dispute actions.
+- Added `react-native-maps`, `react-native-svg` and `lucide-react-native`; code-native vector icons were selected over generated raster imagery so service symbols stay crisp, accessible and consistent across screen densities.
+
+### Active-service verification
+
+- Unified mobile lint and typecheck: PASS.
+- API typecheck and regression suite: PASS (72/72).
+- Live FUEL, TOWING and LOCKOUT paid journeys: PASS with exact integer-kobo reconciliation and 18 realtime updates.
+- Physical visual QA remains part of the Phase 4 unified-device gate.

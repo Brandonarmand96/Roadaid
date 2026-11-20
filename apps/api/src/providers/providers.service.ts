@@ -66,11 +66,20 @@ export class ProvidersService {
       equipmentNotes?: string;
     },
   ) {
-    // Ensure user role is updated to PROVIDER
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { role: Role.PROVIDER },
-    });
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
+    if (user.role === Role.ADMIN) {
+      throw new ForbiddenException({ code: 'PROVIDER_ENROLLMENT_FORBIDDEN', message: 'Administrators cannot register as providers' });
+    }
+    if (user.role === Role.CUSTOMER && user.lastLoginAt) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_PROVIDER_CONVERSION_BLOCKED',
+        message: 'Customer accounts cannot be converted into provider accounts',
+      });
+    }
+    if (user.role === Role.CUSTOMER) {
+      await this.prisma.user.update({ where: { id: userId }, data: { role: Role.PROVIDER } });
+    }
 
     return this.prisma.providerProfile.upsert({
       where: { userId },
@@ -401,10 +410,13 @@ export class ProvidersService {
   }
 
   private async ensureProfileExists(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { role: Role.PROVIDER },
-    });
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.role !== Role.PROVIDER) {
+      throw new ForbiddenException({
+        code: 'PROVIDER_ROLE_REQUIRED',
+        message: 'A provider account is required for this operation',
+      });
+    }
 
     return this.prisma.providerProfile.upsert({
       where: { userId },

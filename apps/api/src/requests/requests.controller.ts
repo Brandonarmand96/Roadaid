@@ -9,7 +9,7 @@ import { RequestsService } from './requests.service';
 
 @Controller('requests')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.CUSTOMER)
+@Roles(Role.CUSTOMER, Role.PROVIDER)
 export class RequestsController {
   constructor(private readonly requests: RequestsService) {}
   @Post() create(@CurrentUser('id') id: string, @Body(new ZodValidationPipe(createServiceRequestSchema)) dto: CreateServiceRequestDto) { return this.requests.create(id, dto); }

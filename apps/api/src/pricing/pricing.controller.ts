@@ -8,7 +8,7 @@ import { PricingService } from './pricing.service';
 
 @Controller('pricing')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.CUSTOMER)
+@Roles(Role.CUSTOMER, Role.PROVIDER)
 export class PricingController {
   constructor(private readonly pricing: PricingService) {}
   @Post('quote') quote(@Body(new ZodValidationPipe(quoteRequestSchema)) dto: QuoteRequestDto) { return this.pricing.quote(dto); }

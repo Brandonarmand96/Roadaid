@@ -7,6 +7,7 @@ import {
   OnboardingStatus,
   ApprovalStatus,
   ProviderAvailability,
+  Role,
   ServiceType,
   DocumentType,
 } from '@roadaid/shared';
@@ -21,7 +22,7 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
     prisma = {
       user: {
         update: jest.fn(),
-        findUnique: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: 'prov-1', role: Role.PROVIDER, lastLoginAt: new Date() }),
       },
       providerProfile: {
         findUnique: jest.fn(),
@@ -147,6 +148,29 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
         'prov-1',
         ProviderAvailability.ONLINE,
       );
+    });
+  });
+
+  describe('Asymmetric unified-app roles', () => {
+    const profile = {
+      businessName: 'Road Rescue',
+      address: 'Abuja',
+      vehicleMake: 'Toyota',
+      vehicleModel: 'Hilux',
+      vehiclePlate: 'ABC-123',
+    };
+
+    it('allows a brand-new customer-role identity to complete first-session provider registration', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'new-user', role: Role.CUSTOMER, lastLoginAt: null });
+      prisma.providerProfile.upsert.mockResolvedValue({ userId: 'new-user' });
+      await expect(service.updateProfile('new-user', profile)).resolves.toEqual({ userId: 'new-user' });
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'new-user' }, data: { role: Role.PROVIDER } });
+    });
+
+    it('blocks an established customer account from converting itself into a provider', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'customer-1', role: Role.CUSTOMER, lastLoginAt: new Date() });
+      await expect(service.updateProfile('customer-1', profile)).rejects.toThrow(ForbiddenException);
+      expect(prisma.providerProfile.upsert).not.toHaveBeenCalled();
     });
   });
 

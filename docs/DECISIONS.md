@@ -24,6 +24,8 @@ Reference: SPEC.md Section 19 & Blueprint Section 3
 8. **Expected scale:** 20–30 active providers, 20–50 requests/day in pilot. Single modular monolith backend with BullMQ worker.
 9. **Single operational region:** Abuja, Nigeria (UTC timestamps internally, formatted in UI using `Africa/Lagos`).
 10. **Money representation:** Integer minor units (kobo) strictly. No floating point.
+11. **Unified mobile application (approved 19 Nov 2026):** RoadAid ships one Android/iOS app. Customer accounts can use Customer mode only. Provider accounts retain provider capabilities and may switch into Customer mode to request assistance. A customer account cannot self-promote after registration; provider registration must be selected during first-account onboarding. Provider background-location permissions are requested only for provider operations.
+12. **Service-specific customer terminology (client feedback, 19 Nov 2026):** Fuel responders are presented as dispatch riders with motorcycle visuals; towing responders as tow operators with tow-truck visuals; lockout responders as roadside technicians with tool visuals. These are presentation labels over the single secured `PROVIDER` role, not additional account roles.
 
 ## 2. Invariants Enforced in Code & Database
 1. **One active job per provider:** Partial unique index `uq_provider_one_active_request` on `service_requests (provider_id)` where status IN ('ASSIGNED', 'EN_ROUTE', 'ARRIVED', 'IN_PROGRESS').

@@ -82,8 +82,8 @@ roadaid/
 ├── apps/
 │   ├── api/                  # NestJS API & Dispatch Engine
 │   ├── admin-web/            # Next.js Admin Web Dashboard
-│   ├── customer-mobile/      # Expo Customer Mobile App
-│   └── provider-mobile/      # Expo Provider Mobile App
+│   ├── provider-mobile/      # Unified Expo app: Customer + Provider modes
+│   └── customer-mobile/      # Legacy source retained temporarily; excluded from workspace
 ├── packages/
 │   ├── shared/               # Domain contracts, enums, Zod schemas, constants
 │   └── config/               # Shared tsconfig & tooling

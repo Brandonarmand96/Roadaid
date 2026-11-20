@@ -30,12 +30,12 @@ Required devices: one customer phone, two approved provider phones, and the admi
 
 ## Phase 4 tracking and payment gate
 
-Required build: provider EAS development APK (Expo Go is not valid for background-location evidence), customer app, and an API reachable by both devices.
+Required build: the unified RoadAid EAS development APK on both phones (Expo Go is not valid for background-location evidence), and an API reachable by both devices. Sign in with a Customer account on one phone and a Provider account on the other.
 
 Record: date/time in `Africa/Lagos`, provider device model/Android or iOS version, build identifier, request code, and a screen recording or timestamped screenshots.
 
 1. Sign in as an approved provider, grant precise foreground location and “Allow all the time” background location, then go online. Confirm the persistent “RoadAid: You’re online” notification appears on Android.
-2. Create and accept a request. Start driving so the request is `EN_ROUTE`; confirm the provider app reports “Live job tracking” and the customer shows a fresh location plus ETA.
+2. In Customer mode, create a request; accept it from Provider mode on the other phone. Start driving so the request is `EN_ROUTE`; confirm Provider mode reports “Live job tracking” and Customer mode shows a fresh location plus ETA.
 3. Lock the provider phone for at least 90 seconds while moving safely. Confirm customer updates continue at approximately five-second intervals and never display stale coordinates as live.
 4. Disable provider mobile data/Wi-Fi for 30–60 seconds while moving. Confirm the customer changes to “Location update delayed” after 30 seconds and retains the last known position.
 5. Restore connectivity before five minutes have elapsed. Confirm buffered points flush oldest-first, the customer returns to “Provider location live”, and the latest marker/coordinates do not jump backward to an older buffered point.

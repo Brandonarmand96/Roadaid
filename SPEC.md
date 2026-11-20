@@ -27,7 +27,7 @@ Version 1.0 · 9 Nov 2026 · Companion to "RoadAid Platform — Product Scope, D
 RoadAid is an Uber/Bolt-style on-demand **roadside assistance** platform for **Abuja, Nigeria**.
 
 - **Services (3):** `FUEL` (emergency fuel delivery), `TOWING`, `LOCKOUT`.
-- **Interfaces (3):** Customer mobile app, Provider mobile app, Admin web dashboard — all served by one backend.
+- **Interfaces (2):** One RoadAid mobile app with Customer and Provider modes, plus the Admin web dashboard — all served by one backend. Provider accounts may use both modes; customer accounts may use Customer mode only.
 - **Flow:** Customer selects service → confirms location → sees price → submits. Backend automatically finds the best eligible provider, sends a timed offer, falls through to the next provider on decline/timeout, confirms exactly one provider, and the customer then sees that provider's live location, ETA and phone number. Provider completes the job; platform records payment, commission and provider earnings. Admin intervenes when automation fails.
 - **Core principle:** one active job per provider. No overlapping assignments.
 - Brand: RoadAid, tagline "BUILT FOR CERTAINTY". Website: https://roadaid.co.
@@ -90,9 +90,8 @@ roadaid/
 │   │   ├── prisma/schema.prisma
 │   │   ├── prisma/migrations/   # includes hand-written SQL migration for PostGIS + partial unique indexes
 │   │   └── test/
-│   ├── admin-web/            # Next.js
-│   ├── customer-mobile/      # Expo
-│   └── provider-mobile/      # Expo
+│   ├── admin-web/            # Next.js admin dashboard
+│   └── provider-mobile/      # Unified RoadAid Expo app (Customer + Provider modes)
 ├── packages/
 │   ├── shared/               # zod schemas, enums, DTO types, constants, API client
 │   └── config/               # eslint, tsconfig, prettier
@@ -507,12 +506,16 @@ Clients must **resync via REST on every reconnect and on app foreground** (fetch
 
 ## 12. Applications
 
-### 12.1 Customer app (`apps/customer-mobile`)
+### 12.1 Customer mode (`apps/provider-mobile`)
 Screens: Splash → Welcome/Consent (location + privacy) → Phone entry → OTP → Name (new users) → **Home** (map with current location + service selector cards: Fuel / Towing / Lockout) → **Service details** (fuel type + litres | towing destination with Places autocomplete | lockout type; vehicle select/add; pickup pin adjust + note) → **Price summary + Confirm** → **Searching** (animated, cancel button, shows "Finding the best provider…") → **Provider assigned** (card: name, photo, rating, vehicle, plate, ETA, call button, live map; status steps) → **Pay** (if due) → **In progress** → **Completed** (receipt, rate provider, report problem) → History list/detail → Profile/Vehicles → Help/Contact.
+- Customer-facing responder terminology and visuals are service-specific: FUEL = dispatch rider/motorcycle; TOWING = tow operator/tow truck; LOCKOUT = roadside technician/tools. The secure backend role remains `PROVIDER` for all three.
+- The assigned-request screen uses a status-progress strip, ETA, responder identity and call action, and a live map with customer pickup and responder markers. It must distinguish live, delayed and disconnected location states.
 - Handle: no provider found ("Our team has been alerted"), payment failed/retry, offline banner, location permission denied (manual address entry fallback), app killed/reopened (restore active request).
 - Push categories: provider assigned, provider arrived, job completed, payment needed, request escalated.
 
-### 12.2 Provider app (`apps/provider-mobile`)
+### 12.2 Provider mode (`apps/provider-mobile`)
+
+The mobile app uses asymmetric role access: `CUSTOMER` accounts can use Customer mode only; `PROVIDER` accounts can switch between Customer and Provider modes. A customer account cannot self-promote after registration. A newly created account may choose provider registration during its first authenticated onboarding flow.
 Screens: Splash → Phone/OTP → **Onboarding wizard** (profile → select services → service-specific details → document upload with camera/gallery → review & submit) → **Pending approval** screen (per-service status, rejection reasons, re-upload) → **Home** (big Online/Offline toggle, Pause toggle, today's earnings, status chip) → **Incoming offer** (full-screen modal over home with countdown ring driven by server `expiresAt` minus clock offset, pickup address, distance, ETA, service details, estimated earnings, Accept/Decline; must also open from a high-priority push when app is backgrounded) → **Active job** (map, "Navigate" opens Google Maps intent with destination, customer name/call button, status buttons: Start trip → Arrived → Start service → Complete; Cancel with reason) → Earnings (daily/weekly, entries) → Wallet & payouts (bank account, request payout, history) → Job history → Profile/Documents.
 - Offer sound + vibration; Android notification channel `offers` with `importance=MAX`.
 - Handle: location permission wizard, battery optimisation guidance, offline banner, being forced offline when stale, unapproved/suspended states, resync on foreground.
@@ -568,7 +571,7 @@ Pages: Login · **Dashboard** (KPI cards, live map of online providers + active 
 Dates assume build starts **9 Nov 2026** with feature freeze **30 Nov 2026**. Adjust only by cutting scope, never by cutting tests.
 
 ### Phase 0 — Foundation (9–11 Nov)
-Monorepo, docker-compose (Postgres+PostGIS, Redis), NestJS skeleton with config validation, Prisma schema + hand-written SQL migration (Section 5.3), seed script, Socket gateway skeleton, shared package, CI pipeline, Expo apps and Next.js app boot, `/health`.
+Monorepo, docker-compose (Postgres+PostGIS, Redis), NestJS skeleton with config validation, Prisma schema + hand-written SQL migration (Section 5.3), seed script, Socket gateway skeleton, shared package, CI pipeline, unified Expo app and Next.js app boot, `/health`.
 **Gate:** `docker compose up` + `pnpm dev` runs all apps; migrations apply cleanly; CI green.
 
 ### Phase 1 — Identity, onboarding, admin approvals (12–15 Nov)
@@ -593,7 +596,7 @@ Bug fixes only. Security review (IDOR, rate limits, secrets), performance pass, 
 ### December (no new features)
 - 1–7 Dec: stable EAS builds (Android AAB/APK, iOS TestFlight), Android closed testing / TestFlight start, load + security tests, device matrix tests.
 - 8–14 Dec: client UAT using the UAT checklist; production deployment; backup/restore + rollback drill.
-- 15–18 Dec: store listings, privacy policy URL, screenshots, review notes, demo accounts (customer, provider, admin) → **submit** both apps.
+- 15–18 Dec: store listings, privacy policy URL, screenshots, review notes, demo accounts (customer, provider, admin) → **submit** the unified mobile app.
 - 19–31 Dec: respond to store feedback, fix defects, admin training, handover pack.
 
 ---
@@ -603,7 +606,7 @@ Bug fixes only. Security review (IDOR, rate limits, secrets), performance pass, 
 - Dockerfiles for `api` and `admin-web`; `docker-compose.prod.yml` with Caddy (auto-HTTPS) → api, admin; managed or containerised Postgres/PostGIS and Redis (enable Redis AOF persistence). Run `prisma migrate deploy` on release.
 - Background worker runs inside the API process for MVP (BullMQ workers + cron); structure code so workers can be split later.
 - Nightly `pg_dump` to S3-compatible storage, 14-day retention; `restore.sh` tested.
-- Sentry for API, admin and both apps; structured logs with request ids; alerts on 5xx rate and queue depth.
+- Sentry for API, admin and the unified mobile app; structured logs with request ids; alerts on 5xx rate and queue depth.
 - Rollback: tag images; `docs/RUNBOOK.md` explains deploy, rollback, restore, rotating secrets, and "dispatch stuck" troubleshooting.
 - Seed script creates the bootstrap super admin; no default passwords in production.
 - All accounts (cloud, Google Maps, Paystack, FCM, SMS, Apple, Google Play) are registered in the **client's** name; document ownership in `docs/HANDOVER.md`.

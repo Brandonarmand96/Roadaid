@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import {
   Check,
@@ -27,6 +27,9 @@ function apiBaseUrl(value?: string) {
 }
 
 const API = apiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
+const ADMIN_TOKEN_KEY = "roadaid-admin-token";
+const SESSION_EXPIRED_EVENT = "roadaid:admin-session-expired";
+const SESSION_EXPIRED_MESSAGE = "Your session expired. Sign in again to continue.";
 type Service = {
   id: string;
   serviceType: string;
@@ -89,9 +92,23 @@ type Payment = { id: string; requestId: string; reference: string; amountKobo: n
 type Payout = { id: string; amountKobo: number; status: string; requestedAt: string; paidReference?: string | null; provider: { user: { fullName?: string | null; phone: string } } };
 type AdminRole = "SUPER_ADMIN" | "OPERATIONS" | "FINANCE";
 
-function roleFromToken(token: string): AdminRole {
-  try { const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); return JSON.parse(atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, "="))).adminRole as AdminRole; }
-  catch { return "SUPER_ADMIN"; }
+function sessionFromToken(token: string): { role: AdminRole; expiresAt: number } | undefined {
+  try {
+    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = JSON.parse(atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, "="))) as {
+      adminRole?: AdminRole;
+      exp?: number;
+    };
+    if (!decoded.adminRole || !decoded.exp) return undefined;
+    return { role: decoded.adminRole, expiresAt: decoded.exp * 1000 };
+  } catch {
+    return undefined;
+  }
+}
+
+function expireAdminSession() {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 }
 
 async function call<T>(
@@ -108,6 +125,10 @@ async function call<T>(
     },
   });
   const body = await response.json().catch(() => ({}));
+  if (response.status === 401 && token) {
+    expireAdminSession();
+    throw new Error(SESSION_EXPIRED_MESSAGE);
+  }
   if (!response.ok)
     throw new Error(body.message ?? "The operation could not be completed.");
   return body as T;
@@ -134,17 +155,53 @@ export default function AdminHomePage() {
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
 
+  const endSession = useCallback((showExpiredMessage = false) => {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    setToken("");
+    setDashboard(undefined);
+    setLive(undefined);
+    setSelected(undefined);
+    setSelectedRequest(undefined);
+    setProviders([]);
+    setPrices([]);
+    setDispatchSettings([]);
+    setRequests([]);
+    setPayments([]);
+    setPayouts([]);
+    setError(showExpiredMessage ? SESSION_EXPIRED_MESSAGE : "");
+  }, []);
+
   useEffect(() => {
-    const saved = localStorage.getItem("roadaid-admin-token");
+    const handleSessionExpiry = () => endSession(true);
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpiry);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpiry);
+  }, [endSession]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(ADMIN_TOKEN_KEY);
     if (!saved) return;
+    const session = sessionFromToken(saved);
+    if (!session || session.expiresAt <= Date.now()) {
+      endSession(true);
+      return;
+    }
     setToken(saved);
-    setAdminRole(roleFromToken(saved));
+    setAdminRole(session.role);
     void load(saved).catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load dashboard data."));
     // Session bootstrap intentionally runs once; load reads the saved token passed above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [endSession]);
   useEffect(() => {
     if (!token) return;
+    const session = sessionFromToken(token);
+    if (!session) {
+      endSession(true);
+      return;
+    }
+    const expiryTimer = window.setTimeout(
+      () => endSession(true),
+      Math.min(Math.max(session.expiresAt - Date.now(), 0), 2_147_483_647),
+    );
     const socket = io(API.replace(/\/v1$/, ""), { auth: { token }, transports: ["websocket", "polling"] });
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => { if (refreshTimer) clearTimeout(refreshTimer); refreshTimer = setTimeout(() => void load(token).catch(() => undefined), 500); };
@@ -152,10 +209,10 @@ export default function AdminHomePage() {
     socket.on("admin.alert", refresh);
     socket.on("provider.availability", refresh);
     socket.on("provider.location", (position: { providerId: string; lat: number; lng: number; receivedAt: string }) => setLive((current) => current ? { ...current, providers: current.providers.map((provider) => provider.providerId === position.providerId ? { ...provider, ...position } : provider) } : current));
-    return () => { if (refreshTimer) clearTimeout(refreshTimer); socket.disconnect(); };
+    return () => { window.clearTimeout(expiryTimer); if (refreshTimer) clearTimeout(refreshTimer); socket.disconnect(); };
     // Reconnect only when the authenticated token changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [endSession, token]);
   async function act(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -175,7 +232,7 @@ export default function AdminHomePage() {
         "",
         { method: "POST", body: JSON.stringify({ email, password }) },
       );
-      localStorage.setItem("roadaid-admin-token", auth.accessToken);
+      localStorage.setItem(ADMIN_TOKEN_KEY, auth.accessToken);
       setToken(auth.accessToken);
       setAdminRole(auth.user.adminRole);
       await load(auth.accessToken);
@@ -184,7 +241,12 @@ export default function AdminHomePage() {
   async function load(accessToken = token) {
     setLoadingData(true);
     try {
-      const role = roleFromToken(accessToken);
+      const session = sessionFromToken(accessToken);
+      if (!session || session.expiresAt <= Date.now()) {
+        expireAdminSession();
+        throw new Error(SESSION_EXPIRED_MESSAGE);
+      }
+      const role = session.role;
       setAdminRole(role);
       setDashboard(await call<Dashboard>("/admin/dashboard", accessToken));
       if (role !== "FINANCE") {
@@ -350,6 +412,10 @@ export default function AdminHomePage() {
       if (reportFrom) query.set("from", `${reportFrom}T00:00:00+01:00`);
       if (reportTo) query.set("to", `${reportTo}T23:59:59+01:00`);
       const response = await fetch(`${API}/admin/reports/${kind}?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (response.status === 401) {
+        expireAdminSession();
+        throw new Error(SESSION_EXPIRED_MESSAGE);
+      }
       if (!response.ok) throw new Error("The report could not be generated. Check your permissions and try again.");
       const url = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a"); anchor.href = url; anchor.download = `roadaid-${kind}.csv`; anchor.click(); URL.revokeObjectURL(url);
@@ -424,8 +490,7 @@ export default function AdminHomePage() {
           </button>
           <button
             onClick={() => {
-              localStorage.removeItem("roadaid-admin-token");
-              setToken("");
+              endSession();
             }}
             className="p-3 rounded-xl hover:bg-slate-800 focus:ring-2 focus:ring-amber-300"
             aria-label="Sign out"

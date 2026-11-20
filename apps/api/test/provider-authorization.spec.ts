@@ -12,6 +12,13 @@ describe('Provider route authorization and rate limits', () => {
     expect(() => guard.canActivate(context)).toThrow('Requires one of roles');
   });
 
+  it('allows a provider token through shared customer-capability routes', () => {
+    const reflector = { getAllAndOverride: jest.fn().mockReturnValue([Role.CUSTOMER, Role.PROVIDER]) } as unknown as Reflector;
+    const guard = new RolesGuard(reflector);
+    const context = { switchToHttp: () => ({ getRequest: () => ({ user: { id: 'provider-1', role: Role.PROVIDER } }) }), getHandler: jest.fn(), getClass: jest.fn() } as unknown as ExecutionContext;
+    expect(guard.canActivate(context)).toBe(true);
+  });
+
   it('limits each provider to one location request per second', async () => {
     const service: any = { updateLocation: jest.fn().mockResolvedValue({ success: true }) };
     const controller = new ProvidersController(service);

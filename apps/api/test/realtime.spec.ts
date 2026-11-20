@@ -10,7 +10,7 @@ describe('RealtimeGateway request room authorization', () => {
   it('allows a customer to join their own request room', async () => {
     prisma.serviceRequest.findFirst.mockResolvedValue({ id: 'request-1' });
     await expect(gateway.handleJoinRequest(client, { requestId: 'request-1' })).resolves.toEqual({ success: true, room: 'request:request-1' });
-    expect(prisma.serviceRequest.findFirst).toHaveBeenCalledWith({ where: { id: 'request-1', customerId: 'customer-1' }, select: { id: true } });
+    expect(prisma.serviceRequest.findFirst).toHaveBeenCalledWith({ where: { id: 'request-1', OR: [{ customerId: 'customer-1' }, { providerId: 'customer-1' }] }, select: { id: true } });
     expect(client.join).toHaveBeenCalledWith('request:request-1');
   });
 
@@ -18,6 +18,13 @@ describe('RealtimeGateway request room authorization', () => {
     prisma.serviceRequest.findFirst.mockResolvedValue(null);
     await expect(gateway.handleJoinRequest(client, { requestId: 'request-2' })).resolves.toEqual({ success: false, error: 'Forbidden request room' });
     expect(client.join).not.toHaveBeenCalled();
+  });
+
+  it('allows a provider to join a request they created in Customer mode', async () => {
+    const providerCustomer: any = { ...client, data: { user: { userId: 'provider-1', role: 'PROVIDER' } }, join: jest.fn() };
+    prisma.serviceRequest.findFirst.mockResolvedValue({ id: 'request-3' });
+    await expect(gateway.handleJoinRequest(providerCustomer, { requestId: 'request-3' })).resolves.toEqual({ success: true, room: 'request:request-3' });
+    expect(prisma.serviceRequest.findFirst).toHaveBeenCalledWith({ where: { id: 'request-3', OR: [{ customerId: 'provider-1' }, { providerId: 'provider-1' }] }, select: { id: true } });
   });
 
   it('allows an authenticated admin without an ownership query', async () => {

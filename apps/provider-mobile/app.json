@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "RoadAid Provider",
-    "slug": "roadaid-provider",
+    "name": "RoadAid",
+    "slug": "roadaid",
     "version": "1.0.0",
     "icon": "./assets/roadaid-mark.png",
     "orientation": "portrait",

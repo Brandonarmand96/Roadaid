@@ -18,11 +18,15 @@ import {
   updateProfileSchema,
   CustomerVehicleDto,
   UpdateProfileDto,
+  Role,
 } from '@roadaid/shared';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('me')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.CUSTOMER, Role.PROVIDER)
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 

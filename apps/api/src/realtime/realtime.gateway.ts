@@ -67,7 +67,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   async handleJoinRequest(@ConnectedSocket() client: Socket, @MessageBody() data: { requestId: string }) {
     const user = client.data.user as JwtPayload | undefined;
     if (data?.requestId && user) {
-      const allowed = user.role === 'ADMIN' || Boolean(await this.prisma.serviceRequest.findFirst({ where: { id: data.requestId, ...(user.role === 'CUSTOMER' ? { customerId: user.userId } : { providerId: user.userId }) }, select: { id: true } }));
+      const allowed = user.role === 'ADMIN' || Boolean(await this.prisma.serviceRequest.findFirst({
+        where: {
+          id: data.requestId,
+          OR: [{ customerId: user.userId }, { providerId: user.userId }],
+        },
+        select: { id: true },
+      }));
       if (!allowed) return { success: false, error: 'Forbidden request room' };
       client.join(`request:${data.requestId}`);
       this.logger.debug(`Socket ${client.id} joined room request:${data.requestId}`);
