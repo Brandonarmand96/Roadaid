@@ -149,6 +149,7 @@ model User {
   serviceRequests  ServiceRequest[]  @relation("CustomerRequests")
   assignedRequests ServiceRequest[]  @relation("ProviderAssignedRequests")
   notifications    Notification[]
+  supportCases     SupportCase[]
   auditLogs        AuditLog[]        @relation("ActorAuditLogs")
 
   @@map("users")
@@ -377,6 +378,15 @@ model ServiceRequest {
   commissionBps             Int           @map("commission_bps")
   paymentStatus             PaymentStatus @default(NONE) @map("payment_status")
   paymentMode               String        @default("ONLINE_AFTER_ACCEPT") @map("payment_mode") @db.VarChar(50)
+  pickupPinHash             String?       @map("pickup_pin_hash") @db.VarChar(255)
+  pickupPinEncrypted        String?       @map("pickup_pin_encrypted") @db.Text
+  pickupVerifiedAt          DateTime?     @map("pickup_verified_at") @db.Timestamptz
+  shareToken                String?       @unique @map("share_token") @db.VarChar(100)
+  beneficiaryName           String?       @map("beneficiary_name") @db.VarChar(120)
+  beneficiaryPhone          String?       @map("beneficiary_phone") @db.VarChar(20)
+  scheduledFor              DateTime?     @map("scheduled_for") @db.Timestamptz
+  providerRatingToCustomer  Int?          @map("rating_provider_to_customer")
+  providerReviewText        String?       @map("provider_review_text") @db.Text
   currentOfferId            String?       @map("current_offer_id") @db.Uuid
   offersMadeCount           Int           @default(0) @map("offers_made_count")
   dispatchRound             Int           @default(1) @map("dispatch_round")
@@ -552,6 +562,23 @@ model Notification {
 
   @@index([userId, readAt])
   @@map("notifications")
+}
+
+model SupportCase {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  requestId String?  @map("request_id") @db.Uuid
+  subject   String   @db.VarChar(160)
+  message   String   @db.Text
+  status    String   @default("OPEN") @db.VarChar(30)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("support_cases")
 }
 
 model AuditLog {

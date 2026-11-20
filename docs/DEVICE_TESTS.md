@@ -6,6 +6,8 @@ Record the date, device/OS, build identifier and PASS/FAIL evidence for every ru
 
 Required devices: one customer phone, two approved provider phones, and the admin dashboard. Provider testing must use an EAS development build for background push; Expo Go may be used only for foreground polling checks.
 
+Two physical phones can verify the customer-to-one-provider happy path, payment and tracking. They cannot prove sequential fallback between two independently locked/backgrounded providers. For the complete Phase 3 gate, use a third physical phone or an Android/iOS simulator as provider 2; do not mark steps 6, 9 or the multi-provider uniqueness evidence as passed with only one provider session.
+
 1. Start PostgreSQL, Redis, API and admin. Confirm `/health`, Redis connectivity and all three devices can reach the API.
 2. On both provider phones, grant notification and precise-location permission, publish fresh GPS and go online for the same approved service.
 3. On the customer phone, create a request within the configured radius. Confirm status changes to `SEARCHING`.
@@ -34,6 +36,16 @@ Required build: the unified RoadAid EAS development APK on both phones (Expo Go 
 
 Record: date/time in `Africa/Lagos`, provider device model/Android or iOS version, build identifier, request code, and a screen recording or timestamped screenshots.
 
+### Location, routing and payment-return preflight
+
+1. On the Customer details screen, type at least three characters into location search. Confirm Nigeria results appear, rapid typing never replaces a newer result with an older response, and selecting a result moves the pin.
+2. Drag the pin away from the selected result. Confirm the address refreshes, then tap Confirm. Reopen the picker and verify the saved pin/address are restored.
+3. Deny GPS permission and confirm manual address/coordinate entry remains available. Remove the server Maps key in a test environment and confirm the recovery message is actionable while existing route display falls back safely.
+4. For towing, select both pickup and destination from the map. Confirm the locked quote uses the road-route distance when Google Routes is configured and remains an integer-kobo amount.
+5. On an active job, pan/zoom the map manually, then trigger a new provider coordinate. Confirm route geometry follows roads, the camera contains responder and pickup, and normal map interaction is not permanently locked.
+6. Start online payment, return to RoadAid before and after Paystack completion, and background/foreground the app. Confirm “Confirming payment” appears, the Pay button is suppressed, and only the server-confirmed `PAID` state unlocks service progression.
+7. During sequential dispatch, verify the customer text changes from checking responders to “reviewing your request” only after `OFFER_SENT`, and explains retrying only after decline/expiry. It must not claim multiple providers are responding at once.
+
 1. Sign in as an approved provider, grant precise foreground location and “Allow all the time” background location, then go online. Confirm the persistent “RoadAid: You’re online” notification appears on Android.
 2. In Customer mode, create a request; accept it from Provider mode on the other phone. Start driving so the request is `EN_ROUTE`; confirm Provider mode reports “Live job tracking” and Customer mode shows a fresh location plus ETA.
 3. Lock the provider phone for at least 90 seconds while moving safely. Confirm customer updates continue at approximately five-second intervals and never display stale coordinates as live.
@@ -44,6 +56,21 @@ Record: date/time in `Africa/Lagos`, provider device model/Android or iOS versio
 8. Confirm the provider wallet increases by exactly `price_kobo - floor(price_kobo × commission_bps / 10000)` and no second earning appears after app restart or webhook replay.
 9. Request a payout, approve it as FINANCE/SUPER_ADMIN, record a manual bank transfer and confirm the wallet receives one exact negative payout ledger entry.
 10. Repeat the locked-phone tracking test with battery saver enabled. Record any OEM restriction and verify the app’s settings guidance leads to the appropriate system screen.
+
+### Cash payment and commission settlement
+
+1. Create a request and select Cash on the quote review. Confirm the receipt total and payment method are visible before submission.
+2. Accept as the provider and progress to `ARRIVED`. Confirm the provider sees the exact cash amount while the customer sees instructions to pay only the verified responder.
+3. Attempt to start service before confirming cash. Confirm the control is unavailable and the API rejects a direct attempt.
+4. Hand over the exact locked total and tap “Confirm cash received” once. Confirm both apps show paid, a MANUAL payment/receipt exists, and service can start.
+5. Confirm the provider wallet records exactly `floor(price_kobo × commission_bps / 10000)` as cash commission due, with no provider-earning credit for the cash job.
+6. Open Account & earnings and pay that commission through Paystack. Return to RoadAid and confirm the pending state prevents a second payment.
+7. Confirm the webhook creates one equal settlement credit, reduces cash commission due to zero, and replaying the webhook does not change the balance again.
+8. Repeat while the provider has online-job earnings. Confirm the available balance is `online earnings − unpaid cash commissions − paid payouts`, and payout cannot exceed a positive resulting balance.
+9. Set a low test `CASH_COMMISSION_LIMIT_KOBO`, accumulate cash commission to exactly the limit during an active job, and confirm that job can finish normally.
+10. After completion, confirm the provider becomes offline, cannot go online, is absent from automatic/eligible-provider results, and sees the exact debt, limit and zero remaining allowance.
+11. Confirm an immediate high-priority repayment notification arrives after cash confirmation. Restart the API twice within 24 hours and confirm it does not create duplicate daily reminders.
+12. Repay enough commission to fall below the limit. Confirm the wallet block disappears immediately and the provider can publish fresh GPS and go online again.
 
 ### Phase 4 evidence table
 

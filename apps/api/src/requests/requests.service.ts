@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomInt, randomUUID } from "crypto";
 import {
   BadRequestException,
   ForbiddenException,
@@ -11,6 +11,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { PricingService } from "../pricing/pricing.service";
 import { DispatchService } from "../dispatch/dispatch.service";
 import { RequestStateService } from "./request-state.service";
+import { protectPickupPin, revealPickupPin } from "./pickup-pin";
 
 @Injectable()
 export class RequestsService {
@@ -22,6 +23,12 @@ export class RequestsService {
   ) {}
 
   async create(customerId: string, dto: CreateServiceRequestDto) {
+    const scheduledFor = dto.scheduledFor ? new Date(dto.scheduledFor) : null;
+    if (scheduledFor) {
+      const delayMs = scheduledFor.getTime() - Date.now();
+      if (delayMs < 30 * 60_000 || delayMs > 30 * 24 * 60 * 60_000)
+        throw new BadRequestException({ code: "INVALID_SCHEDULE_TIME", message: "Schedule assistance between 30 minutes and 30 days from now" });
+    }
     const providerProfile = await this.prisma.providerProfile.findUnique({
       where: { userId: customerId },
       select: { availability: true, currentRequestId: true },
@@ -74,19 +81,23 @@ export class RequestsService {
         }
       : null;
     const details = dto.details as Prisma.InputJsonValue;
+    const pickupPin = String(randomInt(1000, 10_000));
+    const protectedPin = protectPickupPin(pickupPin);
+    const shareToken = randomUUID().replaceAll("-", "");
     const breakdown = quote.breakdown as Prisma.InputJsonValue;
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
         INSERT INTO service_requests
           (id, code, customer_id, service_type, status, vehicle_id, vehicle_snapshot, details,
            pickup_location, pickup_address, pickup_note, distance_km, price_kobo, price_breakdown,
-           commission_bps, payment_mode, search_started_at, created_at, updated_at)
+           commission_bps, payment_mode, pickup_pin_hash, pickup_pin_encrypted, share_token, beneficiary_name, beneficiary_phone, scheduled_for, search_started_at, created_at, updated_at)
         VALUES
           (${id}::uuid, ${code}, ${customerId}::uuid, ${dto.serviceType}::"ServiceType", 'REQUESTED',
            ${dto.vehicleId || null}::uuid, ${vehicleSnapshot ? JSON.stringify(vehicleSnapshot) : null}::jsonb,
            ${JSON.stringify(details)}::jsonb, ST_SetSRID(ST_MakePoint(${dto.pickup.lng}, ${dto.pickup.lat}), 4326)::geography,
            ${dto.pickup.address}, ${dto.pickup.note || null}, ${quote.distanceMeters / 1000}, ${quote.priceKobo},
-           ${JSON.stringify(breakdown)}::jsonb, ${commission.commissionBps}, ${process.env.PAYMENT_MODE || "ONLINE_AFTER_ACCEPT"}, now(), now(), now())`;
+           ${JSON.stringify(breakdown)}::jsonb, ${commission.commissionBps}, ${dto.paymentMethod === "CASH" ? "CASH" : process.env.PAYMENT_MODE || "ONLINE_AFTER_ACCEPT"},
+           ${protectedPin.hash}, ${protectedPin.encrypted}, ${shareToken}, ${dto.beneficiary?.name || null}, ${dto.beneficiary?.phone || null}, ${scheduledFor}, now(), now(), now())`;
       await tx.requestEvent.create({
         data: {
           requestId: id,
@@ -96,11 +107,14 @@ export class RequestsService {
           payload: {
             serviceType: dto.serviceType,
             priceKobo: quote.priceKobo.toString(),
+            paymentMethod: dto.paymentMethod,
+            scheduledFor: scheduledFor?.toISOString() || null,
           },
         },
       });
     });
-    await this.dispatch.start(id);
+    if (scheduledFor) await this.dispatch.schedule(id, scheduledFor);
+    else await this.dispatch.start(id);
     return this.getOwned(customerId, id);
   }
 
@@ -109,7 +123,7 @@ export class RequestsService {
       where: { customerId },
       orderBy: { createdAt: "desc" },
       include: {
-        provider: { select: { fullName: true, phone: true } },
+        provider: { select: { fullName: true, phone: true, avatarUrl: true, providerProfile: { select: { ratingAvg: true, ratingCount: true, completedJobs: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, onboardingStatus: true } } } },
         payments: {
           select: {
             reference: true,
@@ -122,13 +136,13 @@ export class RequestsService {
         events: { orderBy: { createdAt: "asc" } },
       },
     });
-    return this.withPickupCoordinates(requests);
+    return this.withCustomerSecrets(await this.withPickupCoordinates(requests));
   }
   async getOwned(customerId: string, id: string) {
     const request = await this.prisma.serviceRequest.findFirst({
       where: { id, customerId },
       include: {
-        provider: { select: { fullName: true, phone: true } },
+        provider: { select: { fullName: true, phone: true, avatarUrl: true, providerProfile: { select: { ratingAvg: true, ratingCount: true, completedJobs: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, onboardingStatus: true } } } },
         payments: {
           select: {
             reference: true,
@@ -146,7 +160,17 @@ export class RequestsService {
         code: "REQUEST_NOT_FOUND",
         message: "Request not found",
       });
-    return (await this.withPickupCoordinates([request]))[0];
+    return (await this.withCustomerSecrets(await this.withPickupCoordinates([request])))[0];
+  }
+  private async withCustomerSecrets<T extends { pickupPinEncrypted?: string | null }>(requests: T[]) {
+    return requests.map((request) => {
+      const source = request as T & { pickupPinHash?: string | null };
+      const pickupPinEncrypted = source.pickupPinEncrypted;
+      const safe = { ...source };
+      delete safe.pickupPinEncrypted;
+      delete safe.pickupPinHash;
+      return { ...safe, pickupPin: pickupPinEncrypted ? revealPickupPin(pickupPinEncrypted) : null };
+    });
   }
   cancelOwned(customerId: string, id: string, reason: string) {
     return this.states.cancel(id, { type: "CUSTOMER", id: customerId }, reason);

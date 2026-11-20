@@ -13,6 +13,8 @@ import { Role } from '@roadaid/shared';
 export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
   @Post('initialize') initialize(@CurrentUser('id') customerId: string, @Body('requestId') requestId: string) { return this.payments.initialize(customerId, requestId); }
+  @Post('cash/collect') collectCash(@CurrentUser('id') providerId: string, @Body('requestId') requestId: string) { return this.payments.collectCash(providerId, requestId); }
+  @Post('commission/initialize') settleCommission(@CurrentUser('id') providerId: string, @Body('requestId') requestId: string) { return this.payments.initializeCommissionSettlement(providerId, requestId); }
   @Get(':reference/status') status(@CurrentUser('id') customerId: string, @Param('reference') reference: string) { return this.payments.status(customerId, reference); }
 }
 

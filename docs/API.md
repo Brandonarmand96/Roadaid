@@ -20,16 +20,20 @@ The REST API is served under `/v1`; Socket.IO uses the API origin without the `/
 | Vehicles | `/v1/me/vehicles` | Customer or Provider acting as customer |
 | Quote | `POST /v1/pricing/quote` | Customer or Provider acting as customer |
 | Requests | `GET/POST /v1/requests`, `GET /v1/requests/:id` | Request owner |
+| Shared request | `GET /v1/public/requests/:shareToken` | Public possession of private link |
 | Cancellation | `POST /v1/requests/:id/cancel` | Request owner |
 | Rating/dispute | `POST /v1/requests/:id/rating`, `POST /v1/requests/:id/dispute` | Request owner |
 | Provider onboarding | `/v1/provider/profile`, `/services`, `/documents`, `/submit` | Authenticated/Provider as guarded per route |
 | Availability/location | `POST /v1/provider/availability`, `/location`, `/location/batch` | Provider |
 | Offers | `GET /v1/provider/offers`, `POST /:id/accept`, `POST /:id/decline` | Owning provider |
-| Jobs | `GET /v1/provider/jobs/current`, `POST /:id/status`, `POST /:id/cancel` | Assigned provider |
-| Payment | `POST /v1/payments/initialize`, `GET /v1/payments/:reference/status` | Request owner |
+| Jobs | `GET /v1/provider/jobs`, `GET /current`, `POST /:id/status`, `POST /:id/cancel`, `POST /:id/rating` | Assigned provider |
+| Notifications | `GET /v1/notifications`, `POST /:id/read`, `POST /read-all` | Owning customer/provider |
+| Support | `GET/POST /v1/support/cases` | Owning customer/provider |
+| Payment | `POST /v1/payments/initialize`, `POST /v1/payments/cash/collect`, `POST /v1/payments/commission/initialize`, `GET /v1/payments/:reference/status` | Request owner or assigned provider, endpoint-dependent |
 | Paystack webhook | `POST /v1/webhooks/paystack` | HMAC signature |
 | Wallet/payout | `/v1/provider/wallet`, `/earnings`, `/bank-account`, `/payouts` | Provider |
 | Admin operations | `/v1/admin/*` | ADMIN plus `AdminRole` guard |
+| Admin support | `GET /v1/admin/support-cases`, `POST /:id/status` | Operations/Super Admin |
 
 ## Exact-value rules
 

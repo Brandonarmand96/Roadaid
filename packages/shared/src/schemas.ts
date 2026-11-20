@@ -74,6 +74,9 @@ export const quoteRequestSchema = z.object({
 
 export const createServiceRequestSchema = z.object({
   serviceType: z.nativeEnum(ServiceType),
+  paymentMethod: z.enum(['ONLINE', 'CASH']).default('ONLINE'),
+  beneficiary: z.object({ name: z.string().trim().min(2).max(120), phone: phoneSchema }).optional(),
+  scheduledFor: z.string().datetime().optional(),
   pickup: z.object({
     lat: z.number().min(-90).max(90),
     lng: z.number().min(-180).max(180),

@@ -99,6 +99,16 @@ export class AdminController {
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS, AdminRole.FINANCE)
   dashboard() { return this.adminService.dashboard(); }
 
+  @Get('support-cases')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  supportCases(@Query('status') status?: string) { return this.adminService.getSupportCases(status); }
+
+  @Post('support-cases/:id/status')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  updateSupportCase(@Param('id') id: string, @Body('status') status: string, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) {
+    return this.adminService.updateSupportCase(id, status, admin.id, admin.adminRole || 'ADMIN', req.ip);
+  }
+
   @Get('live')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   live() { return this.adminService.liveSnapshot(); }

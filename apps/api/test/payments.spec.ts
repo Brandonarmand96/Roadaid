@@ -8,13 +8,14 @@ describe('PaymentsService', () => {
   const payment = { id: 'payment-1', requestId: request.id, amountKobo: 10001n, status: PaymentStatus.PENDING, request };
   const tx: any = {
     $queryRaw: jest.fn(),
-    payment: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
+    payment: { findUniqueOrThrow: jest.fn(), update: jest.fn(), create: jest.fn(), findFirst: jest.fn() },
     serviceRequest: { update: jest.fn() },
     ledgerEntry: { createMany: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
     providerProfile: { update: jest.fn() },
     requestEvent: { create: jest.fn() },
   };
   const prisma: any = {
+    $queryRaw: jest.fn().mockResolvedValue([{ due: 1500n }]),
     payment: { findUnique: jest.fn(), update: jest.fn() },
     webhookEvent: { create: jest.fn(), deleteMany: jest.fn() },
     serviceRequest: { findFirst: jest.fn() },
@@ -61,6 +62,39 @@ describe('PaymentsService', () => {
     expect(ledgerRows[1].amountKobo).toBe(1500n);
     expect(tx.ledgerEntry.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amountKobo: 8501n, providerId: 'provider-1' }) });
     expect(1500n + 8501n).toBe(10001n);
+  });
+
+  it('records cash as provider-held money and an exact commission debt', async () => {
+    tx.$queryRaw.mockResolvedValue([{ id: 'request-1', code: 'RA-1', customer_id: 'customer-1', provider_id: 'provider-1', status: RequestStatus.ARRIVED, payment_mode: 'CASH', payment_status: PaymentStatus.NONE, price_kobo: 10001n, commission_bps: 1500 }]);
+    tx.payment.create.mockResolvedValue({ id: 'cash-payment-1' });
+    await service.collectCash('provider-1', 'request-1');
+    const rows = tx.ledgerEntry.createMany.mock.calls[0][0].data;
+    expect(rows[0]).toEqual(expect.objectContaining({ type: 'CUSTOMER_PAYMENT', amountKobo: 10001n }));
+    expect(rows[1]).toEqual(expect.objectContaining({ type: 'PLATFORM_COMMISSION', providerId: 'provider-1', amountKobo: -1500n }));
+    expect(tx.providerProfile.update).toHaveBeenCalledWith(expect.objectContaining({ data: { walletBalanceKobo: { decrement: 1500n } } }));
+  });
+
+  it('rejects cash confirmation from a provider who does not own the job', async () => {
+    tx.$queryRaw.mockResolvedValue([{ id: 'request-1', provider_id: 'provider-2' }]);
+    await expect(service.collectCash('provider-1', 'request-1')).rejects.toThrow('Active job not found');
+    expect(tx.ledgerEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it('settles cash commission once with an equal provider credit', async () => {
+    const settlement = { id: 'settlement-payment-1', requestId: 'request-1', customerId: 'provider-1', amountKobo: 1500n, status: PaymentStatus.PENDING, request };
+    prisma.payment.findUnique.mockResolvedValue(settlement);
+    tx.payment.findUniqueOrThrow.mockResolvedValue(settlement);
+    tx.payment.update.mockResolvedValue({ ...settlement, status: PaymentStatus.PAID });
+    gateway.verify.mockResolvedValue({ status: 'success', amountKobo: 1500n, currency: 'NGN', response: {} });
+    await service.verifyAndMarkPaid('RA-COM-1');
+    expect(tx.ledgerEntry.create).toHaveBeenCalledWith({ data: expect.objectContaining({ type: 'ADJUSTMENT', providerId: 'provider-1', amountKobo: 1500n }) });
+    expect(tx.providerProfile.update).toHaveBeenCalledWith(expect.objectContaining({ data: { walletBalanceKobo: { increment: 1500n } } }));
+
+    jest.clearAllMocks();
+    prisma.payment.findUnique.mockResolvedValue({ ...settlement, status: PaymentStatus.PAID });
+    await service.verifyAndMarkPaid('RA-COM-1');
+    expect(gateway.verify).not.toHaveBeenCalled();
+    expect(tx.ledgerEntry.create).not.toHaveBeenCalled();
   });
 
   it('creates an exact negative refund ledger entry once a paid row is locked', async () => {

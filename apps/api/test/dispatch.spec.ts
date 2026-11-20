@@ -32,6 +32,14 @@ describe('DispatchService offer responses', () => {
     expect(prisma.dispatchOffer.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ providerId: 'provider-1', status: OfferStatus.PENDING }) }));
   });
 
+  it('queues scheduled dispatch with a stable idempotent job id', async () => {
+    const add = jest.fn();
+    (service as any).nextQueue = { add };
+    const scheduledFor = new Date(Date.now() + 3_600_000);
+    await service.schedule('request-1', scheduledFor);
+    expect(add).toHaveBeenCalledWith('dispatch:start', { requestId: 'request-1' }, expect.objectContaining({ jobId: 'dispatch-start-request-1', delay: expect.any(Number) }));
+  });
+
   it('rejects an offer owned by another provider as unavailable', async () => {
     tx.$queryRaw.mockResolvedValueOnce([]);
     await expect(service.respond('provider-2', 'offer-1', true)).rejects.toThrow(ConflictException);
@@ -88,5 +96,18 @@ describe('DispatchService offer responses', () => {
     const result = await service.redispatch('request-1', 'admin-1');
     expect(result).toMatchObject({ status: RequestStatus.SEARCHING, dispatchRound: 2 });
     expect(tx.requestEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'ADMIN_ACTION', payload: { action: 'REDISPATCH', round: 2 } }) }));
+  });
+
+  it('allows the assigned provider to rate a completed customer once', async () => {
+    tx.$queryRaw.mockResolvedValueOnce([{ status: RequestStatus.COMPLETED, provider_id: 'provider-1', rating_provider_to_customer: null }]);
+    tx.serviceRequest.update.mockResolvedValue({ id: 'request-1', providerRatingToCustomer: 5 });
+    await service.rateCustomer('provider-1', 'request-1', 5, 'Clear handoff');
+    expect(tx.serviceRequest.update).toHaveBeenCalledWith({ where: { id: 'request-1' }, data: { providerRatingToCustomer: 5, providerReviewText: 'Clear handoff' } });
+    expect(tx.requestEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'CUSTOMER_RATED', actorId: 'provider-1' }) }));
+  });
+
+  it('rejects a customer rating from a provider who did not own the job', async () => {
+    tx.$queryRaw.mockResolvedValueOnce([{ status: RequestStatus.COMPLETED, provider_id: 'provider-2', rating_provider_to_customer: null }]);
+    await expect(service.rateCustomer('provider-1', 'request-1', 5)).rejects.toThrow(ConflictException);
   });
 });

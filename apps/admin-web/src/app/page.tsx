@@ -17,6 +17,7 @@ import {
   Banknote,
   Download,
   MapPin,
+  MessageSquareText,
 } from "lucide-react";
 import { APIProvider, Map, AdvancedMarker } from "@vis.gl/react-google-maps";
 import { io } from "socket.io-client";
@@ -91,6 +92,7 @@ type LiveSnapshot = { providers: LiveProvider[]; activeRequests: Array<{ id: str
 type Payment = { id: string; requestId: string; reference: string; amountKobo: number; status: string; gateway: string; paidAt?: string | null; request: { code: string; serviceType: string; status: string; paymentStatus: string } };
 type Payout = { id: string; amountKobo: number; status: string; requestedAt: string; paidReference?: string | null; provider: { user: { fullName?: string | null; phone: string } } };
 type AdminRole = "SUPER_ADMIN" | "OPERATIONS" | "FINANCE";
+type SupportCase = { id: string; requestId?: string | null; subject: string; message: string; status: string; createdAt: string; user: { fullName?: string | null; phone: string; role: string } };
 
 function sessionFromToken(token: string): { role: AdminRole; expiresAt: number } | undefined {
   try {
@@ -151,6 +153,7 @@ export default function AdminHomePage() {
   const [live, setLive] = useState<LiveSnapshot>();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
+  const [supportCases, setSupportCases] = useState<SupportCase[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
@@ -168,6 +171,7 @@ export default function AdminHomePage() {
     setRequests([]);
     setPayments([]);
     setPayouts([]);
+    setSupportCases([]);
     setError(showExpiredMessage ? SESSION_EXPIRED_MESSAGE : "");
   }, []);
 
@@ -250,10 +254,10 @@ export default function AdminHomePage() {
       setAdminRole(role);
       setDashboard(await call<Dashboard>("/admin/dashboard", accessToken));
       if (role !== "FINANCE") {
-        const [providerData, priceData, dispatchData, requestData, liveData] = await Promise.all([
-          call<Provider[]>("/admin/providers", accessToken), call<PriceRule[]>("/admin/pricing", accessToken), call<DispatchSetting[]>("/admin/dispatch-settings", accessToken), call<RoadRequest[]>("/admin/requests", accessToken), call<LiveSnapshot>("/admin/live", accessToken),
+        const [providerData, priceData, dispatchData, requestData, liveData, supportData] = await Promise.all([
+          call<Provider[]>("/admin/providers", accessToken), call<PriceRule[]>("/admin/pricing", accessToken), call<DispatchSetting[]>("/admin/dispatch-settings", accessToken), call<RoadRequest[]>("/admin/requests", accessToken), call<LiveSnapshot>("/admin/live", accessToken), call<SupportCase[]>("/admin/support-cases", accessToken),
         ]);
-        setProviders(providerData); setPrices(priceData); setDispatchSettings(dispatchData); setRequests(requestData); setLive(liveData);
+        setProviders(providerData); setPrices(priceData); setDispatchSettings(dispatchData); setRequests(requestData); setLive(liveData); setSupportCases(supportData);
         if (selected) await openProvider(selected.userId, accessToken);
       }
       if (role !== "OPERATIONS") {
@@ -749,11 +753,21 @@ export default function AdminHomePage() {
           </section>
         </div>
         </>}
+        {adminRole !== "FINANCE" && (
+          <section className="mt-8 bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden">
+            <div className="p-5 border-b border-[#d8d2c5] flex items-center gap-3"><MessageSquareText size={19} className="text-amber-800" /><div><h3 className="font-black">Customer and provider support</h3><p className="text-sm text-slate-500">Persisted help requests assigned to Operations.</p></div></div>
+            <div className="divide-y divide-[#e4ded3] max-h-[520px] overflow-y-auto">{supportCases.length ? supportCases.map((item) => <div key={item.id} className="p-5"><div className="flex items-start justify-between gap-4"><div><p className="font-black">{item.subject}</p><p className="text-sm text-slate-600 mt-1">{item.user.fullName || item.user.phone} · {item.user.role}</p><p className="text-sm mt-3 whitespace-pre-wrap">{item.message}</p><p className="text-xs text-slate-500 mt-2">{new Date(item.createdAt).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}{item.requestId ? ` · Request ${item.requestId}` : ""}</p></div><Status value={item.status} /></div><div className="flex flex-wrap gap-2 mt-4">{item.status === "OPEN" ? <Action label="Start review" onClick={() => void mutate(`/admin/support-cases/${item.id}/status`, { status: "IN_PROGRESS" })} /> : null}{item.status !== "RESOLVED" ? <Action label="Resolve" onClick={() => void mutate(`/admin/support-cases/${item.id}/status`, { status: "RESOLVED" })} /> : null}</div></div>) : <EmptyMessage title="No support cases" body="New customer and provider help requests will appear here." />}</div>
+          </section>
+        )}
         {adminRole !== "OPERATIONS" && (
           <section className="mt-8 grid xl:grid-cols-2 gap-6">
             <div className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden">
               <div className="p-5 border-b border-[#d8d2c5] flex items-center justify-between gap-4"><div className="flex items-center gap-3"><Banknote size={19} className="text-amber-800" /><div><h3 className="font-black">Payments</h3><p className="text-sm text-slate-500">Latest customer collections and refunds.</p></div></div><Action label="Revenue CSV" onClick={() => void downloadReport("revenue")} /></div>
-              <div className="divide-y divide-[#e4ded3] max-h-[520px] overflow-y-auto">{payments.length ? payments.map((payment) => <div key={payment.id} className="p-5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="font-black truncate">{payment.request.code}</p><p className="text-sm text-slate-600 mt-1 truncate">{payment.gateway} · {payment.reference}</p><p className="text-xs text-slate-500 mt-1">{payment.request.serviceType}</p></div><div className="text-right shrink-0"><p className="font-black tabular-nums">{money(payment.amountKobo)}</p><Status value={payment.status} /></div></div><div className="flex flex-wrap gap-2 mt-4">{["PENDING", "FAILED"].includes(payment.status) && payment.request.paymentStatus !== "PAID" && <Action label="Mark request paid" onClick={() => void markRequestPaid(payment.requestId)} />}{payment.status === "PAID" && <Action label="Refund" tone="danger" onClick={() => void refundRequest(payment.requestId)} />}</div></div>) : <EmptyMessage title="No payments recorded" body="Customer payment attempts will appear here." />}</div>
+              <div className="divide-y divide-[#e4ded3] max-h-[520px] overflow-y-auto">{payments.length ? payments.map((payment) => {
+                const isCommission = payment.reference.startsWith("RA-COM-");
+                const isCash = payment.reference.startsWith("RA-CASH-");
+                return <div key={payment.id} className="p-5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="font-black truncate">{payment.request.code}</p><p className="text-sm text-slate-600 mt-1 truncate">{isCommission ? "Provider commission settlement" : isCash ? "Cash collected by provider" : payment.gateway} · {payment.reference}</p><p className="text-xs text-slate-500 mt-1">{payment.request.serviceType}</p></div><div className="text-right shrink-0"><p className="font-black tabular-nums">{money(payment.amountKobo)}</p><Status value={payment.status} /></div></div>{!isCommission && !isCash ? <div className="flex flex-wrap gap-2 mt-4">{["PENDING", "FAILED"].includes(payment.status) && payment.request.paymentStatus !== "PAID" && <Action label="Mark request paid" onClick={() => void markRequestPaid(payment.requestId)} />}{payment.status === "PAID" && <Action label="Refund" tone="danger" onClick={() => void refundRequest(payment.requestId)} />}</div> : null}</div>;
+              }) : <EmptyMessage title="No payments recorded" body="Customer payments and provider commission settlements will appear here." />}</div>
             </div>
             <div className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden">
               <div className="p-5 border-b border-[#d8d2c5] flex items-center justify-between gap-4"><div><h3 className="font-black">Provider payouts</h3><p className="text-sm text-slate-500">Manual bank transfers with audited approval.</p></div><Action label="Payout CSV" onClick={() => void downloadReport("payouts")} /></div>

@@ -218,6 +218,7 @@ The user confirmed the complete physical provider/admin journey, including per-s
 - Full workspace lint and typecheck: PASS.
 - API/shared tests: PASS (37 total: API 33, shared 4).
 - API and admin production builds: PASS.
+- Live journey: PASS for FUEL, TOWING and LOCKOUT with 18 realtime updates and exact integer-kobo commission/earning reconciliation.
 - Live PostGIS/API gate data:
   - FUEL quote and locked price: 1,050,000 kobo (`RA-20261114-C6A885`).
   - TOWING quote and locked price: 2,006,850 kobo (`RA-20261114-8DDBD7`).
@@ -569,3 +570,76 @@ Phase 3 dispatch is now authorized.
 - Complete the updated unified-app device matrix in `docs/DEVICE_TESTS.md`, including smallest supported screen, large text, TalkBack/VoiceOver, keyboard-open sheets, locked-phone push/location, weak/offline recovery and battery saver.
 - Run and record a production-like Compose deployment using a real secret file, then perform the documented backup/restore and rollback drills in an isolated environment.
 - Freeze new feature work after acceptance; subsequent changes are release defects, security fixes or store-readiness work only.
+
+### Slice 4 — Uber/Bolt-style journey refinements — 20 Nov 2026
+
+- Added authenticated, server-side Google Places autocomplete, place resolution, reverse geocoding and Google Routes integration with request timeouts, bounded coordinate validation and deterministic routing fallback.
+- Replaced coordinate-first customer entry with a searchable, draggable-pin confirmation screen for pickup and towing destination while preserving manual/GPS recovery.
+- Towing pricing now uses server route distance when configured; all prices, balances and daily earnings remain integer kobo.
+- Active customer and provider maps render road geometry and fit both endpoints without a permanently controlled camera.
+- Customer dispatch messaging now reflects recorded sequential-offer events, including review, decline/expiry retry and operations escalation.
+- Payment return now polls authoritative server status on foreground, prevents duplicate payment taps while verification is pending and clearly tells the customer not to pay twice.
+- Provider command center now reports GPS accuracy/freshness, resyncs both offers and active job after every accept/decline attempt, and shows Lagos-day paid-job count and earnings.
+- Added explicit destructive cancellation confirmation and expanded accessible labels/live status announcements.
+- Extended physical-device acceptance instructions for location search, pin confirmation, route pricing, map camera behavior, payment return and the limits of a two-phone Phase 3 run.
+
+### Slice 4 verification
+
+- Workspace lint: PASS with no warnings or errors.
+- Workspace typecheck: PASS across all five active packages.
+- API/shared regression suites: PASS (77 API + 4 shared), including Maps validation/fallback and route-backed towing pricing.
+- API and admin production builds: PASS.
+- Physical-device validation remains required for native Places interaction, draggable-pin behavior, map camera animation and Paystack app-return behavior; the exact evidence steps are in `docs/DEVICE_TESTS.md`.
+
+### Slice 5 — Cash collection and commission settlement — 20 Nov 2026
+
+- Added customer choice between secure in-app payment and cash to the assigned provider, captured before request submission.
+- Cash jobs show the exact locked amount to both parties; the provider can confirm receipt only after arrival, and service cannot begin before confirmation.
+- Cash confirmation records a MANUAL customer payment and an exact negative provider commission ledger entry. It does not credit provider earnings because the provider already holds the gross cash.
+- Provider wallet now exposes total cash commission due and each unsettled request. Providers can pay an individual commission through Paystack, with foreground verification and duplicate-payment suppression.
+- Verified commission settlement adds one equal positive adjustment, reducing provider debt. Cash debt participates in the ledger-derived available balance, so it offsets online earnings and constrains payouts.
+- Added ownership, exact-kobo cash commission and duplicate-safe settlement coverage; expanded the physical-device matrix for the full cash journey.
+
+### Slice 5 verification
+
+- Workspace lint: PASS with no warnings or errors.
+- Workspace typecheck: PASS across all five active packages.
+- API/shared regression suites: PASS (80 API + 4 shared), including assigned-provider ownership, exact cash commission debt and idempotent commission settlement.
+- API and admin production builds: PASS.
+- Existing live FUEL, TOWING and LOCKOUT Paystack journeys: PASS with 18 realtime updates and exact integer-kobo reconciliation.
+- Physical-device cash handover and real Paystack commission settlement remain acceptance evidence to capture using `docs/DEVICE_TESTS.md`; automated tests use the gateway abstraction and do not claim a real bank transaction occurred.
+
+### Slice 6 — Cash commission exposure controls — 20 Nov 2026
+
+- Added the integer-kobo `CASH_COMMISSION_LIMIT_KOBO` policy with a ₦50,000 default and exposed debt, limit, remaining allowance and blocked status in the provider wallet.
+- Providers at or above the ceiling cannot go online or enter automatic dispatch candidate results. An active job is never interrupted; the provider is returned offline after completion if the ceiling has been reached.
+- Provider mode clearly explains the block and removes its go-online action until verified repayment reduces debt below the threshold.
+- Cash confirmation sends an immediate high-priority repayment notification. A server reminder pass runs on startup and every six hours, with database-backed 24-hour deduplication per provider.
+- Added automated coverage proving an otherwise eligible provider cannot go online at the exact debt ceiling.
+
+### Slice 6 verification
+
+- Workspace lint and typecheck: PASS.
+- API/shared regression suites: PASS (81 API + 4 shared).
+
+### Phase 5 marketplace trust and notification hardening — 20 Nov 2026
+
+- Added a per-request four-digit pickup PIN with AES-256-GCM encryption, a separate keyed verifier and customer-only plaintext retrieval. Providers must verify it before marking arrival; provider payloads strip all PIN secrets and private share tokens.
+- Enriched the assigned-provider customer experience with verified provider identity, rating, completed-job count and service vehicle details.
+- Added server-calculated offer economics (customer price, commission and provider net) using integer kobo arithmetic, alongside payment mode, ETA and distance context.
+- Added an authenticated customer/provider notification inbox API with ownership-scoped list, mark-one-read and mark-all-read operations, plus a customer mobile inbox entry point.
+- Added database fields and migration groundwork for beneficiary, scheduling, private request sharing and reciprocal ratings without exposing unfinished flows in the mobile UI.
+- Verification: Prisma client generation PASS; workspace lint/typecheck/build PASS; full API regression suite PASS (86/86), including pickup-PIN cryptography and notification ownership tests.
+
+### Phase 5 delegated, scheduled and support experience — 20 Nov 2026
+
+- Added beneficiary booking with validated Nigerian contact details carried through the customer review, provider active-job handoff and request history.
+- Added scheduled requests for one hour or the next day in mobile, with server validation for the 30-minute to 30-day window, delayed BullMQ activation and database sweeper recovery after Redis loss or process restarts.
+- Added private request-status sharing through a random 128-bit token and an explicit redacted public projection that excludes account, payment, event and pickup-PIN secrets.
+- Added provider job history and one-time provider-to-customer ratings for completed assigned jobs.
+- Added provider notification inbox read controls alongside the customer inbox.
+- Added persisted customer/provider support cases, request ownership validation, an Operations queue, audited status changes and admin dashboard controls.
+- Verification: Prisma generation, workspace lint/typecheck/build PASS; API regression suite PASS (95/95), including scheduled-window, private-share, reciprocal-rating and support ownership assertions.
+- Commission-sensitive targeted suites: PASS (41/41 across dispatch, provider availability, request state, payments and wallet).
+- API and admin production builds: PASS.
+- Physical push delivery, 24-hour reminder deduplication and at-limit device behavior remain listed acceptance evidence in `docs/DEVICE_TESTS.md`.

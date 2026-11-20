@@ -93,18 +93,46 @@ export class AdminService {
     return after;
   }
 
-  getRequests(status?: string, serviceType?: ServiceType) {
-    return this.prisma.serviceRequest.findMany({
+  async getRequests(status?: string, serviceType?: ServiceType) {
+    const requests = await this.prisma.serviceRequest.findMany({
       where: { ...(status ? { status: status as any } : {}), ...(serviceType ? { serviceType } : {}) },
       include: { customer: { select: { id: true, phone: true, fullName: true } }, provider: { select: { id: true, phone: true, fullName: true } } },
       orderBy: { createdAt: 'desc' }, take: 100,
     });
+    return requests.map((request) => this.withoutRequestSecrets(request));
   }
 
   async getRequestDetail(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({ where: { id }, include: { customer: { select: { id: true, phone: true, fullName: true } }, provider: { select: { id: true, phone: true, fullName: true } }, events: { orderBy: { createdAt: 'asc' } } } });
     if (!request) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
-    return request;
+    return this.withoutRequestSecrets(request);
+  }
+
+  private withoutRequestSecrets<T extends { pickupPinHash?: string | null; pickupPinEncrypted?: string | null; shareToken?: string | null }>(request: T) {
+    const safe = { ...request };
+    delete safe.pickupPinHash;
+    delete safe.pickupPinEncrypted;
+    delete safe.shareToken;
+    return safe;
+  }
+
+  getSupportCases(status?: string) {
+    return this.prisma.supportCase.findMany({
+      where: status ? { status } : undefined,
+      include: { user: { select: { id: true, fullName: true, phone: true, role: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  async updateSupportCase(id: string, status: string, adminId: string, adminRole: string, ip?: string) {
+    if (!['OPEN', 'IN_PROGRESS', 'RESOLVED'].includes(status))
+      throw new BadRequestException({ code: 'INVALID_SUPPORT_STATUS', message: 'Status must be OPEN, IN_PROGRESS or RESOLVED' });
+    const before = await this.prisma.supportCase.findUnique({ where: { id } });
+    if (!before) throw new NotFoundException({ code: 'SUPPORT_CASE_NOT_FOUND', message: 'Support case not found' });
+    const after = await this.prisma.supportCase.update({ where: { id }, data: { status } });
+    await this.auditService.log({ actorId: adminId, actorRole: adminRole, action: 'SUPPORT_CASE_STATUS_UPDATED', entityType: 'SUPPORT_CASE', entityId: id, before, after, ip });
+    return after;
   }
 
   redispatchRequest(id: string, adminId: string) { return this.dispatch.redispatch(id, adminId); }

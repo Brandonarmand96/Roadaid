@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -12,6 +12,7 @@ import {
   View,
   Platform,
   Linking,
+  AppState,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { fetch as expoFetch } from "expo/fetch";
@@ -41,8 +42,10 @@ const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
 const LOCATION_TASK = "roadaid-provider-location";
 const LOCATION_BUFFER_KEY = "provider-location-buffer";
 type LocationPoint = { lat: number; lng: number; accuracy: number; heading?: number; speed?: number; recordedAt: string };
-type Wallet = { balanceKobo: number; entries: Array<{ id: string; type: string; amountKobo: number; description: string; createdAt: string }> };
+type Wallet = { balanceKobo: number; cashCommissionDueKobo: number; cashCommissionLimitKobo: number; cashCommissionRemainingKobo: number; commissionBlocked: boolean; cashCommissions: Array<{ requestId: string; code: string; amountKobo: number }>; entries: Array<{ id: string; requestId?: string | null; type: string; amountKobo: number; description: string; createdAt: string }> };
 type Payout = { id: string; amountKobo: number; status: string; requestedAt: string; paidReference?: string | null };
+type ProviderJobHistory = { id: string; code: string; serviceType: string; status: string; pickupAddress: string; priceKobo: number; completedAt?: string | null; providerRatingToCustomer?: number | null; beneficiaryName?: string | null; customer?: { fullName?: string | null } };
+type InboxNotification = { id: string; title: string; body: string; readAt?: string | null; createdAt: string };
 type Step =
   "phone" | "otp" | "profile" | "services" | "documents" | "review" | "status";
 type Service = {
@@ -84,6 +87,11 @@ type Offer = {
     serviceType: string;
     pickupAddress: string;
     priceKobo: number;
+    commissionBps: number;
+    commissionKobo: number;
+    providerNetKobo: number;
+    paymentMode: string;
+    distanceKm?: number | null;
     details: unknown;
   };
 };
@@ -96,8 +104,13 @@ type Job = {
   pickupLat?: number;
   pickupLng?: number;
   customer?: { fullName?: string; phone: string };
+  beneficiaryName?: string | null;
+  beneficiaryPhone?: string | null;
+  paymentMode?: string;
+  paymentStatus?: string;
+  priceKobo?: number;
 };
-type MapPoint = { latitude: number; longitude: number };
+type MapPoint = { latitude: number; longitude: number; accuracy?: number | null; recordedAt?: string };
 
 function normalizeJob(value: unknown): Job | null {
   if (!value || typeof value !== "object") return null;
@@ -115,6 +128,11 @@ function normalizeJob(value: unknown): Job | null {
     pickupLat: source.pickupLat,
     pickupLng: source.pickupLng,
     customer: source.customer,
+    beneficiaryName: source.beneficiaryName,
+    beneficiaryPhone: source.beneficiaryPhone,
+    paymentMode: source.paymentMode,
+    paymentStatus: source.paymentStatus,
+    priceKobo: source.priceKobo,
   };
 }
 
@@ -296,6 +314,10 @@ export default function App() {
   const [newProviderEnrollment, setNewProviderEnrollment] = useState(false);
   const [providerPoint, setProviderPoint] = useState<MapPoint>();
   const [showProviderAccount, setShowProviderAccount] = useState(false);
+  const [pendingCommissionReference, setPendingCommissionReference] = useState<string>();
+  const [pickupPin, setPickupPin] = useState("");
+  const [providerJobs, setProviderJobs] = useState<ProviderJobHistory[]>([]);
+  const [providerNotifications, setProviderNotifications] = useState<InboxNotification[]>([]);
   const [form, setForm] = useState({
     businessName: "",
     address: "",
@@ -347,6 +369,29 @@ export default function App() {
       .catch(() => undefined);
   }, [token, profile?.onboardingStatus, job?.status]);
   useEffect(() => {
+    if (!token || !showProviderAccount || role !== Role.PROVIDER) return;
+    void Promise.all([
+      request<ProviderJobHistory[]>("/provider/jobs", {}, token),
+      request<InboxNotification[]>("/notifications", {}, token),
+    ]).then(([jobs, notifications]) => { setProviderJobs(jobs); setProviderNotifications(notifications); }).catch(() => undefined);
+  }, [showProviderAccount, token, role]);
+  useEffect(() => {
+    if (!token || !pendingCommissionReference) return;
+    let active = true;
+    const verify = async () => {
+      if (AppState.currentState !== "active") return;
+      const payment = await request<{ status: string }>(`/payments/${encodeURIComponent(pendingCommissionReference)}/status`, {}, token).catch(() => undefined);
+      if (active && payment?.status === "PAID") {
+        setWallet(await request<Wallet>("/provider/wallet", {}, token));
+        setPendingCommissionReference(undefined);
+      }
+    };
+    void verify();
+    const timer = setInterval(() => void verify(), 2500);
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void verify(); });
+    return () => { active = false; clearInterval(timer); subscription.remove(); };
+  }, [pendingCommissionReference, token]);
+  useEffect(() => {
     if (!token || profile?.onboardingStatus !== OnboardingStatus.APPROVED) return;
     const configure = async () => {
       const shouldTrack = Boolean(job || ["ONLINE", "RESERVED", "BUSY"].includes(profile.availability || ""));
@@ -359,7 +404,7 @@ export default function App() {
       const background = await Location.getBackgroundPermissionsAsync();
       if (!foreground.granted || !background.granted) { setTrackingState("OFF"); return; }
       const lastPosition = await Location.getLastKnownPositionAsync();
-      if (lastPosition) setProviderPoint({ latitude: lastPosition.coords.latitude, longitude: lastPosition.coords.longitude });
+      if (lastPosition) setProviderPoint({ latitude: lastPosition.coords.latitude, longitude: lastPosition.coords.longitude, accuracy: lastPosition.coords.accuracy, recordedAt: new Date(lastPosition.timestamp).toISOString() });
       const active = Boolean(job && ["ASSIGNED", "EN_ROUTE", "ARRIVED", "IN_PROGRESS"].includes(job.status));
       if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
       await Location.startLocationUpdatesAsync(LOCATION_TASK, {
@@ -559,6 +604,7 @@ export default function App() {
       const point = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
+      setProviderPoint({ latitude: point.coords.latitude, longitude: point.coords.longitude, accuracy: point.coords.accuracy, recordedAt: new Date(point.timestamp).toISOString() });
       await request(
         "/provider/location",
         {
@@ -596,29 +642,55 @@ export default function App() {
   async function respondToOffer(id: string, accept: boolean) {
     if (!token) return;
     await act(async () => {
-      await request(
-        `/provider/offers/${id}/${accept ? "accept" : "decline"}`,
-        {
-          method: "POST",
-          body: accept
-            ? undefined
-            : JSON.stringify({ reason: "Not available for this job" }),
-        },
-        token,
-      );
-      setOffers(normalizeOffers(await request<Offer[]>("/provider/offers", {}, token)));
+      try {
+        await request(
+          `/provider/offers/${id}/${accept ? "accept" : "decline"}`,
+          {
+            method: "POST",
+            body: accept
+              ? undefined
+              : JSON.stringify({ reason: "Not available for this job" }),
+          },
+          token,
+        );
+      } finally {
+        const [nextOffers, nextJob] = await Promise.all([
+          request<Offer[]>("/provider/offers", {}, token),
+          request<unknown>("/provider/jobs/current", {}, token),
+        ]);
+        setOffers(normalizeOffers(nextOffers));
+        setJob(normalizeJob(nextJob));
+      }
     });
   }
   async function progressJob(status: string) {
     if (!token || !job) return;
+    if (status === "ARRIVED" && !/^\d{4}$/.test(pickupPin)) return setError("Enter the customer’s 4-digit pickup PIN before marking arrival.");
     await act(async () => {
       setJob(
         await request<Job>(
           `/provider/jobs/${job.id}/status`,
-          { method: "POST", body: JSON.stringify({ status }) },
+          { method: "POST", body: JSON.stringify({ status, pickupPin: status === "ARRIVED" ? pickupPin : undefined }) },
           token,
         ),
       );
+      if (status === "ARRIVED") setPickupPin("");
+    });
+  }
+  async function collectCash() {
+    if (!token || !job) return;
+    await act(async () => {
+      await request("/payments/cash/collect", { method: "POST", body: JSON.stringify({ requestId: job.id }) }, token);
+      setJob(normalizeJob(await request<unknown>("/provider/jobs/current", {}, token)));
+      setWallet(await request<Wallet>("/provider/wallet", {}, token));
+    });
+  }
+  async function settleCommission(requestId: string) {
+    if (!token) return;
+    await act(async () => {
+      const initialized = await request<{ reference: string; authorizationUrl: string }>("/payments/commission/initialize", { method: "POST", body: JSON.stringify({ requestId }) }, token);
+      setPendingCommissionReference(initialized.reference);
+      await Linking.openURL(initialized.authorizationUrl);
     });
   }
   async function cancelJob() {
@@ -635,6 +707,13 @@ export default function App() {
         token,
       );
       setJob(null);
+    });
+  }
+  async function rateCustomer(requestId: string, rating: number) {
+    if (!token) return;
+    await act(async () => {
+      await request(`/provider/jobs/${requestId}/rating`, { method: "POST", body: JSON.stringify({ rating }) }, token);
+      setProviderJobs(await request<ProviderJobHistory[]>("/provider/jobs", {}, token));
     });
   }
 
@@ -656,8 +735,10 @@ export default function App() {
     return (
       <ProviderCommandCenter
         point={providerPoint}
+        token={token}
         availability={profile.availability ?? "OFFLINE"}
         trackingState={trackingState}
+        commissionPolicy={wallet ? { dueKobo: wallet.cashCommissionDueKobo, limitKobo: wallet.cashCommissionLimitKobo, remainingKobo: wallet.cashCommissionRemainingKobo, blocked: wallet.commissionBlocked } : undefined}
         offers={offers}
         job={job}
         busy={busy}
@@ -665,6 +746,9 @@ export default function App() {
         onGoOnline={() => void goOnline()}
         onRespond={(id, accept) => void respondToOffer(id, accept)}
         onProgress={(status) => void progressJob(status)}
+        pickupPin={pickupPin}
+        onPickupPinChange={setPickupPin}
+        onCollectCash={() => void collectCash()}
         onCancelJob={() => void cancelJob()}
         onLocationSettings={() => void Linking.openSettings()}
         onCustomerMode={() => setMode("CUSTOMER")}
@@ -675,6 +759,11 @@ export default function App() {
 
   const sequence: Step[] = ["profile", "services", "documents", "review"];
   const position = sequence.indexOf(step) + 1;
+  const todayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Lagos" }).format(new Date());
+  const todaysCredits = wallet?.entries.filter((entry) =>
+    entry.amountKobo > 0 && new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Lagos" }).format(new Date(entry.createdAt)) === todayKey,
+  ) ?? [];
+  const todayEarningsKobo = todaysCredits.reduce((total, entry) => total + entry.amountKobo, 0);
   return (
     <SafeAreaProvider>
       <SafeAreaView style={s.safe} edges={["top", "right", "bottom", "left"]}>
@@ -935,6 +1024,13 @@ export default function App() {
             />
             {profile?.onboardingStatus === OnboardingStatus.APPROVED && (
               <>
+                {showProviderAccount ? <>
+                  <Text style={s.section}>NOTIFICATIONS</Text>
+                  <Link label="Mark all notifications as read" onPress={() => void act(async () => { await request("/notifications/read-all", { method: "POST" }, token); setProviderNotifications((items) => items.map((item) => ({ ...item, readAt: item.readAt ?? new Date().toISOString() }))); })} />
+                  {providerNotifications.length ? providerNotifications.slice(0, 20).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void act(async () => { await request(`/notifications/${item.id}/read`, { method: "POST" }, token); setProviderNotifications((items) => items.map((current) => current.id === item.id ? { ...current, readAt: new Date().toISOString() } : current)); })} style={[s.notice, !item.readAt && { borderColor: "#D38A1C" }]}><Text style={s.noticeTitle}>{item.title}{item.readAt ? "" : " · New"}</Text><Text style={s.noticeBody}>{item.body}</Text><Text style={s.muted}>{new Date(item.createdAt).toLocaleString("en-NG")}</Text></Pressable>) : <Notice title="You’re all caught up" body="Offer, payment, and account updates will appear here." />}
+                  <Text style={s.section}>JOB HISTORY</Text>
+                  {providerJobs.length ? providerJobs.map((item) => <View key={item.id} style={s.notice}><Text style={s.noticeTitle}>{item.serviceType} · {item.code}</Text><Text style={s.noticeBody}>{item.pickupAddress}</Text><Summary label="Customer" value={item.beneficiaryName ?? item.customer?.fullName ?? "RoadAid customer"} /><Summary label="Earning basis" value={money(item.priceKobo)} />{item.status === "COMPLETED" && !item.providerRatingToCustomer ? <><Text style={s.muted}>Rate the customer after this completed handoff.</Text><View style={s.row}>{[1, 2, 3, 4, 5].map((rating) => <Pressable key={rating} accessibilityRole="button" accessibilityLabel={`Rate customer ${rating} stars`} onPress={() => void rateCustomer(item.id, rating)} style={s.providerNavAction}><Text style={s.providerNavText}>{rating}★</Text></Pressable>)}</View></> : item.providerRatingToCustomer ? <Summary label="Your customer rating" value={`${item.providerRatingToCustomer}/5`} /> : null}</View>) : <Notice title="No completed jobs" body="Completed and cancelled jobs will appear here." />}
+                </> : null}
                 <Notice
                   title={trackingState === "ACTIVE" ? "Live job tracking" : trackingState === "IDLE" ? "Background location ready" : "Background location needs attention"}
                   body={trackingState === "ACTIVE" ? "Your location is updating about every 5 seconds. Failed updates are queued and sent oldest-first when your connection returns." : trackingState === "IDLE" ? "RoadAid checks your position about every 30 seconds while you wait for work." : "Allow location all the time before going online so tracking continues while your phone is locked."}
@@ -948,10 +1044,8 @@ export default function App() {
                     </Text>
                     <Text style={s.noticeBody}>{job.pickupAddress || "Pickup details are syncing. Refresh status if they do not appear."}</Text>
                     <Text style={s.noticeBody}>
-                      Customer:{" "}
-                      {job.customer?.fullName ??
-                        job.customer?.phone ??
-                        "RoadAid customer"}
+                      Roadside contact:{" "}
+                      {job.beneficiaryName ?? job.customer?.fullName ?? job.customer?.phone ?? "RoadAid customer"}
                     </Text>
                     <Summary label="Job status" value={job.status || "SYNCING"} />
                     {job.status === "ASSIGNED" && (
@@ -1033,6 +1127,13 @@ export default function App() {
                 )}
                 <Text style={s.section}>EARNINGS & PAYOUTS</Text>
                 <Summary label="Available balance" value={money(wallet?.balanceKobo ?? 0)} />
+                <Summary label="Cash commission due" value={money(wallet?.cashCommissionDueKobo ?? 0)} />
+                <Summary label="Commission limit" value={money(wallet?.cashCommissionLimitKobo ?? 0)} />
+                {wallet?.commissionBlocked ? <Notice title="Repayment required" body="You have reached your cash commission limit and cannot go online or receive offers until you repay enough commission." warning /> : wallet?.cashCommissionDueKobo ? <Notice title={`${money(wallet.cashCommissionRemainingKobo)} allowance remaining`} body="Repay cash commission before reaching the limit to keep receiving offers." /> : null}
+                <Summary label="Today’s completed payments" value={String(todaysCredits.length)} />
+                <Summary label="Today’s earnings" value={money(todayEarningsKobo)} />
+                {pendingCommissionReference ? <Notice title="Confirming commission payment" body="We are verifying your Paystack payment. Do not submit it again." /> : null}
+                {wallet?.cashCommissions.map((commission) => <SecondaryButton key={commission.requestId} label={`Pay ${money(commission.amountKobo)} for ${commission.code}`} onPress={() => void settleCommission(commission.requestId)} disabled={busy || Boolean(pendingCommissionReference)} />)}
                 {wallet?.entries.length ? wallet.entries.slice(0, 5).map((entry) => <Summary key={entry.id} label={entry.description} value={`${entry.amountKobo < 0 ? "−" : "+"}${money(Math.abs(entry.amountKobo))}`} />) : <Notice title="No earnings yet" body="Completed paid jobs will appear here automatically." />}
                 <Field label="Bank name" value={bank.bankName} onChangeText={(bankName) => setBank({ ...bank, bankName })} maxLength={100} />
                 <Field label="10-digit account number" value={bank.accountNumber} onChangeText={(accountNumber) => setBank({ ...bank, accountNumber: accountNumber.replace(/\D/g, "").slice(0, 10) })} keyboardType="number-pad" />
@@ -1073,23 +1174,30 @@ export default function App() {
   );
 }
 
-function ProviderCommandCenter({ point, availability, trackingState, offers, job, busy, error, onGoOnline, onRespond, onProgress, onCancelJob, onLocationSettings, onCustomerMode, onAccount }: {
+function ProviderCommandCenter({ point, token, availability, trackingState, commissionPolicy, offers, job, busy, error, pickupPin, onPickupPinChange, onGoOnline, onRespond, onProgress, onCollectCash, onCancelJob, onLocationSettings, onCustomerMode, onAccount }: {
   point?: MapPoint;
+  token: string;
   availability: string;
   trackingState: "OFF" | "IDLE" | "ACTIVE";
+  commissionPolicy?: { dueKobo: number; limitKobo: number; remainingKobo: number; blocked: boolean };
   offers: Offer[];
   job: Job | null;
   busy: boolean;
   error: string;
+  pickupPin: string;
+  onPickupPinChange: (value: string) => void;
   onGoOnline: () => void;
   onRespond: (id: string, accept: boolean) => void;
   onProgress: (status: "EN_ROUTE" | "ARRIVED" | "IN_PROGRESS" | "COMPLETED") => void;
+  onCollectCash: () => void;
   onCancelJob: () => void;
   onLocationSettings: () => void;
   onCustomerMode: () => void;
   onAccount: () => void;
 }) {
   const [, setTick] = useState(0);
+  const mapRef = useRef<MapView>(null);
+  const [route, setRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
   useEffect(() => {
     if (!offers.length) return;
     const timer = setInterval(() => setTick((value) => value + 1), 1000);
@@ -1103,14 +1211,28 @@ function ProviderCommandCenter({ point, availability, trackingState, offers, job
   const pickup = job && Number.isFinite(job.pickupLat) && Number.isFinite(job.pickupLng)
     ? { latitude: job.pickupLat as number, longitude: job.pickupLng as number }
     : undefined;
+  useEffect(() => {
+    if (!point || !pickup) { setRoute([]); return; }
+    let active = true;
+    void request<{ points: Array<{ lat: number; lng: number }> }>("/maps/route", { method: "POST", body: JSON.stringify({ origin: { lat: point.latitude, lng: point.longitude }, destination: { lat: pickup.latitude, lng: pickup.longitude } }) }, token)
+      .then((value) => {
+        if (!active) return;
+        const points = value.points.map((item) => ({ latitude: item.lat, longitude: item.lng }));
+        setRoute(points);
+        requestAnimationFrame(() => mapRef.current?.fitToCoordinates(points.length > 1 ? points : [point, pickup], { edgePadding: { top: 120, right: 60, bottom: 360, left: 60 }, animated: true }));
+      })
+      .catch(() => setRoute([point, pickup]));
+    return () => { active = false; };
+  }, [job?.id, point?.latitude, point?.longitude, pickup?.latitude, pickup?.longitude, token]);
+  const locationAgeSeconds = point?.recordedAt ? Math.max(0, Math.floor((Date.now() - Date.parse(point.recordedAt)) / 1000)) : null;
   return (
     <SafeAreaProvider>
       <View style={s.providerMapShell}>
         <StatusBar barStyle="dark-content" />
-        <MapView style={StyleSheet.absoluteFill} region={{ ...center, latitudeDelta: 0.05, longitudeDelta: 0.05 }} showsUserLocation showsMyLocationButton={false} toolbarEnabled={false}>
+        <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={{ ...center, latitudeDelta: 0.05, longitudeDelta: 0.05 }} showsUserLocation showsMyLocationButton={false} toolbarEnabled={false}>
           {point ? <Marker coordinate={point} title="Your live position" pinColor="#191D23" /> : null}
           {pickup ? <Marker coordinate={pickup} title="Customer pickup" pinColor="#D38A1C" /> : null}
-          {point && pickup ? <Polyline coordinates={[point, pickup]} strokeColor="#D38A1C" strokeWidth={5} /> : null}
+          {route.length > 1 ? <Polyline coordinates={route} strokeColor="#D38A1C" strokeWidth={5} /> : null}
         </MapView>
         <SafeAreaView style={s.providerMapTop} edges={["top", "right", "left"]} pointerEvents="box-none">
           <View style={s.providerTopBar}>
@@ -1125,20 +1247,31 @@ function ProviderCommandCenter({ point, availability, trackingState, offers, job
             {error ? <Notice title="Action failed" body={error} warning /> : null}
             {job ? <>
               <View style={s.providerJobHeading}><View style={s.providerJobIcon}><Navigation color="#191D23" size={25} /></View><View style={s.providerJobCopy}><Text style={s.providerSheetTitle}>{job.serviceType || "Roadside assistance"}</Text><Text style={s.providerSheetIntro}>{job.pickupAddress || "Pickup details are syncing"}</Text></View></View>
-              <Summary label="Customer" value={job.customer?.fullName ?? job.customer?.phone ?? "RoadAid customer"} />
+              <Summary label="Roadside contact" value={job.beneficiaryName ?? job.customer?.fullName ?? job.customer?.phone ?? "RoadAid customer"} />
+              {job.beneficiaryPhone ? <Summary label="Contact phone" value={job.beneficiaryPhone} /> : null}
               <Summary label="Status" value={(job.status || "SYNCING").replaceAll("_", " ")} />
+              <Summary label="Payment" value={job.paymentMode === "CASH" ? `Collect ${money(job.priceKobo ?? 0)} cash` : job.paymentStatus === "PAID" ? "Paid in RoadAid" : "Awaiting in-app payment"} />
               {pickup ? <SecondaryButton label="Navigate to pickup" onPress={() => openNavigation(job)} /> : null}
-              {nextAction ? <Button label={nextAction[0]} onPress={() => onProgress(nextAction[1])} busy={busy} /> : null}
+              {job.status === "EN_ROUTE" ? <Field label="Customer pickup PIN" value={pickupPin} onChangeText={(value) => onPickupPinChange(value.replace(/\D/g, "").slice(0, 4))} keyboardType="number-pad" maxLength={4} placeholder="4 digits" /> : null}
+              {job.paymentMode === "CASH" && job.status === "ARRIVED" && job.paymentStatus !== "PAID" ? <Button label={`Confirm ${money(job.priceKobo ?? 0)} cash received`} onPress={onCollectCash} busy={busy} /> : null}
+              {nextAction && !(nextAction[1] === "IN_PROGRESS" && job.paymentStatus !== "PAID") ? <Button label={nextAction[0]} onPress={() => onProgress(nextAction[1])} busy={busy} /> : null}
               <Link label="Cancel and return job to search" onPress={onCancelJob} />
             </> : offer ? <>
               <View style={s.offerHeading}><View><Text style={s.providerSheetTitle}>{offer.request.serviceType} request</Text><Text style={s.providerSheetIntro}>{offer.request.pickupAddress}</Text></View><View style={s.offerTimer}><Clock3 color="#191D23" size={18} /><Text style={s.offerTimerText}>{secondsLeft}s</Text></View></View>
               <Summary label="Estimated arrival" value={offer.etaSecondsAtOffer ? `${Math.max(1, Math.ceil(offer.etaSecondsAtOffer / 60))} min` : "Calculating"} />
+              <Summary label="Customer price" value={money(offer.request.priceKobo)} />
+              <Summary label="RoadAid commission" value={money(offer.request.commissionKobo)} />
+              <Summary label="You receive" value={money(offer.request.providerNetKobo)} />
+              <Summary label="Payment" value={offer.request.paymentMode === "CASH" ? "Cash from customer" : "Paid securely in RoadAid"} />
+              {offer.request.distanceKm ? <Summary label="Service distance" value={`${offer.request.distanceKm.toFixed(1)} km`} /> : null}
               <View style={s.offerActions}><View style={s.providerFlex}><SecondaryButton label="Decline" onPress={() => onRespond(offer.id, false)} disabled={busy} /></View><View style={s.providerFlex}><Button label="Accept job" onPress={() => onRespond(offer.id, true)} busy={busy} /></View></View>
             </> : <>
               <View style={s.providerIdleIcon}><Power color={online ? "#218A52" : "#83520F"} size={28} /></View>
               <Text style={s.providerSheetTitle}>{online ? "You’re ready for roadside jobs" : "Go online when you’re ready"}</Text>
               <Text style={s.providerSheetIntro}>{online ? "RoadAid is matching nearby requests to your approved services." : "Share your location to receive one timed offer at a time."}</Text>
-              {trackingState === "OFF" && online ? <SecondaryButton label="Fix background location" onPress={onLocationSettings} /> : !online ? <Button label="Share location and go online" onPress={onGoOnline} busy={busy} /> : null}
+              {commissionPolicy?.blocked ? <Notice title="Commission repayment required" body={`You owe ${money(commissionPolicy.dueKobo)} and have reached the ${money(commissionPolicy.limitKobo)} limit. Repay from Account & earnings to go online.`} warning /> : commissionPolicy && commissionPolicy.dueKobo > 0 ? <Text style={s.providerSheetIntro}>Cash commission due: {money(commissionPolicy.dueKobo)} · allowance remaining: {money(commissionPolicy.remainingKobo)}</Text> : null}
+              {point ? <Text accessibilityLiveRegion="polite" style={s.providerSheetIntro}>GPS {point.accuracy == null ? "accuracy unavailable" : `±${Math.round(point.accuracy)} m`} · {locationAgeSeconds == null ? "freshness unavailable" : locationAgeSeconds < 15 ? "updated just now" : `updated ${locationAgeSeconds}s ago`}</Text> : null}
+              {trackingState === "OFF" && online ? <SecondaryButton label="Fix background location" onPress={onLocationSettings} /> : !online && !commissionPolicy?.blocked ? <Button label="Share location and go online" onPress={onGoOnline} busy={busy} /> : null}
             </>}
             <View style={s.providerSheetNav}><Pressable accessibilityRole="button" accessibilityLabel="Switch to Customer mode" onPress={onCustomerMode} style={s.providerNavAction}><Crosshair color="#191D23" size={20} /><Text style={s.providerNavText}>Customer mode</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Open account and earnings" onPress={onAccount} style={s.providerNavAction}><UserRound color="#191D23" size={20} /><Text style={s.providerNavText}>Account & earnings</Text></Pressable></View>
             </ScrollView>

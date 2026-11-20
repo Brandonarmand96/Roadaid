@@ -136,7 +136,8 @@ FCM_SERVICE_ACCOUNT_JSON=          # base64
 SENTRY_DSN=
 ADMIN_BOOTSTRAP_EMAIL=
 ADMIN_BOOTSTRAP_PASSWORD=
-PAYMENT_MODE=ONLINE_AFTER_ACCEPT   # ONLINE_AFTER_ACCEPT | ONLINE_ON_COMPLETION
+PAYMENT_MODE=ONLINE_AFTER_ACCEPT   # default for in-app payments; customer may instead select CASH
+CASH_COMMISSION_LIMIT_KOBO=5000000 # default ₦50,000; integer kobo only
 ```
 Mobile: `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY`, `EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY`.
 Admin: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY`.
@@ -194,7 +195,7 @@ Defaults: FUEL 30s/15km/5; TOWING 45s/15km/5; LOCKOUT 30s/15km/5; shortlist 5; s
 
 **commission_settings** — id, service_type (unique), commission_bps (basis points; e.g. 1500 = 15%), updated_by.
 
-**service_requests** — id, code (human-friendly e.g. `RA-20261109-0042`), customer_id, service_type, status, provider_id (nullable), vehicle_id (nullable) + vehicle snapshot JSON, details JSON (FUEL: `{fuelType, litres}`; TOWING: `{destination:{lat,lng,address}, vehicleCondition}`; LOCKOUT: `{lockType: KEYS_INSIDE|LOST_KEY|BROKEN_KEY, notes}`), pickup_location geography, pickup_address, pickup_note, distance_km (towing, from Routes API), price_kobo (locked at creation), price_breakdown JSON, commission_bps (snapshot), payment_status, payment_mode (snapshot of PAYMENT_MODE), current_offer_id, offers_made_count, eta_seconds (latest), accepted_at, arrived_at, started_at, completed_at, cancelled_at, cancelled_by, cancel_reason, cancel_fee_kobo, search_started_at, escalated_at, rating_customer_to_provider (1–5), review_text, dispute_flag, dispute_reason, disputed_at.
+**service_requests** — id, code (human-friendly e.g. `RA-20261109-0042`), customer_id, service_type, status, provider_id (nullable), vehicle_id (nullable) + vehicle snapshot JSON, details JSON (FUEL: `{fuelType, litres}`; TOWING: `{destination:{lat,lng,address}, vehicleCondition}`; LOCKOUT: `{lockType: KEYS_INSIDE|LOST_KEY|BROKEN_KEY, notes}`), pickup_location geography, pickup_address, pickup_note, distance_km (towing, from Routes API), price_kobo (locked at creation), price_breakdown JSON, commission_bps (snapshot), payment_status, payment_mode (`ONLINE_AFTER_ACCEPT`/`ONLINE_ON_COMPLETION`/`CASH`), current_offer_id, offers_made_count, eta_seconds (latest), accepted_at, arrived_at, started_at, completed_at, cancelled_at, cancelled_by, cancel_reason, cancel_fee_kobo, search_started_at, escalated_at, rating_customer_to_provider (1–5), review_text, dispute_flag, dispute_reason, disputed_at.
 
 **request_events** — id, request_id, type (e.g. CREATED, OFFER_SENT, OFFER_DECLINED, OFFER_EXPIRED, ASSIGNED, STATUS_CHANGED, ESCALATED, ADMIN_ACTION, PAYMENT_UPDATE, CANCELLED, DISPUTE), actor_type (CUSTOMER|PROVIDER|ADMIN|SYSTEM), actor_id, payload JSON, created_at. **Append-only.**
 
@@ -390,6 +391,15 @@ Return `{priceKobo, breakdown[], distanceKm}`. The quote is recomputed and **loc
 6. Failed/abandoned payments: customer can retry (new reference). Admin can mark request paid manually (`gateway=MANUAL`, requires reason, audited).
 7. **Refunds:** admin-initiated only. Creates `REFUND` ledger entries (negative), `payments.status=REFUNDED`, and records the Paystack refund reference if issued via API; otherwise a manual note.
 8. Cancellation after payment: admin decides refund; the dashboard shows "Refund due" flag for paid + cancelled requests.
+9. **Cash option:** the customer chooses cash before submitting. After arrival, the provider confirms the exact locked amount was received before starting service. RoadAid records a MANUAL cash payment, a gross customer-payment entry, and a negative provider-scoped `PLATFORM_COMMISSION` entry equal to `floor(amount × commission_bps / 10000)`. No provider earning is credited because the provider already holds the gross cash.
+10. **Cash commission settlement:** the provider wallet shows outstanding cash commission per request and in total. The provider can pay an individual commission through Paystack. A verified settlement creates one positive provider-scoped `ADJUSTMENT` entry, reducing the debt exactly; webhook replay must not create a second settlement. Cash commission debt participates in the ledger-derived available balance and can offset online earnings before payout.
+11. **Cash commission debt ceiling:** providers may finish an already-active job, but cannot go online, receive an automatic offer or be manually presented as eligible when outstanding cash commission is at or above `CASH_COMMISSION_LIMIT_KOBO` (default 5,000,000 kobo / ₦50,000). The server enforces the limit; the client only explains it. Verified repayment immediately recalculates eligibility. Providers receive a high-priority notification when cash commission is added and a deduplicated reminder at most once per 24 hours while debt remains.
+12. **Secure roadside handoff:** each request receives a cryptographically protected four-digit pickup PIN. Only the owning customer may retrieve the plaintext PIN. A provider must submit the correct PIN before moving an `EN_ROUTE` request to `ARRIVED`; provider, admin and realtime payloads must never expose the PIN verifier or encrypted value.
+13. **Persistent notification inbox:** customer and provider push messages are also stored in the in-app inbox. Inbox list and read operations are always scoped by the authenticated user, and push delivery remains best-effort rather than a source of dispatch truth.
+14. **Provider offer economics:** an offer shows the customer price, platform commission, provider net amount, payment mode, pickup distance and ETA before acceptance. Commission and net values are computed on the server with integer kobo arithmetic.
+15. **Planned and delegated assistance:** customers may request help for another named Nigerian phone contact and may schedule matching between 30 minutes and 30 days ahead. Scheduled activation must survive Redis loss through database recovery and must not bypass normal dispatch eligibility or the one-active-job-per-provider invariant.
+16. **Private status sharing:** each request has an unguessable private share token. The public projection exposes only operational status, pickup description and responder identity needed for tracking; it never exposes customer identity, phone numbers, payment data, pickup PIN material or internal events.
+17. **Two-sided trust and support:** a provider may rate the customer once after a completed assigned job. Customer and provider help requests are persisted, ownership-scoped and handled by Operations through audited OPEN, IN_PROGRESS and RESOLVED states.
 
 ### 8.3 Wallet and payouts
 - `WalletService.balance(providerId) = SUM(ledger_entries.amount_kobo WHERE provider_id=… AND type IN (PROVIDER_EARNING, PAYOUT, ADJUSTMENT))`.
@@ -452,7 +462,7 @@ Return `{priceKobo, breakdown[], distanceKm}`. The quote is recomputed and **loc
 - `POST /requests/:id/cancel` `{reason}`
 - `POST /requests/:id/rating` `{rating, review}`
 - `POST /requests/:id/dispute` `{reason}`
-- `POST /payments/initialize`, `GET /payments/:reference/status`
+- `POST /payments/initialize`, `POST /payments/cash/collect`, `POST /payments/commission/initialize`, `GET /payments/:reference/status`
 - `POST /devices` register push token
 
 ### Provider
@@ -628,7 +638,7 @@ Bug fixes only. Security review (IDOR, rate limits, secrets), performance pass, 
 ---
 
 ## 19. Defaults and assumptions to record in `docs/DECISIONS.md` on day one
-1. Payment timing: online, after provider acceptance, before service start.
+1. Payment timing: customer choice of in-app payment after provider acceptance or cash to the provider after arrival; both must be confirmed before service starts.
 2. Cancellation fee: ₦0 until the client sets a policy.
 3. Placeholder prices (Section 8.1) until the client supplies real ones.
 4. Commission 15% (1500 bps) placeholder.

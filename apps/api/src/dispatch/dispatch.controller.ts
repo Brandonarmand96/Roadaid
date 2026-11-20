@@ -23,6 +23,8 @@ export class DispatchController {
 export class ProviderJobsController {
   constructor(private readonly dispatch: DispatchService) {}
   @Get('current') currentJob(@CurrentUser('id') providerId: string) { return this.dispatch.currentJob(providerId); }
-  @Post(':id/status') updateStatus(@CurrentUser('id') providerId: string, @Param('id') id: string, @Body('status') status: RequestStatus) { return this.dispatch.updateJobStatus(providerId, id, status); }
+  @Get() history(@CurrentUser('id') providerId: string) { return this.dispatch.jobHistory(providerId); }
+  @Post(':id/status') updateStatus(@CurrentUser('id') providerId: string, @Param('id') id: string, @Body() body: { status: RequestStatus; pickupPin?: string }) { return this.dispatch.updateJobStatus(providerId, id, body.status, body.pickupPin); }
   @Post(':id/cancel') cancel(@CurrentUser('id') providerId: string, @Param('id') id: string, @Body('reason') reason?: string) { return this.dispatch.cancelAcceptedJob(providerId, id, reason || 'Provider unable to continue'); }
+  @Post(':id/rating') rateCustomer(@CurrentUser('id') providerId: string, @Param('id') id: string, @Body() body: { rating: number; review?: string }) { return this.dispatch.rateCustomer(providerId, id, body.rating, body.review); }
 }

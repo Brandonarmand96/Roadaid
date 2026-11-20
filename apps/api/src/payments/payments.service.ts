@@ -1,16 +1,19 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, UnauthorizedException } from '@nestjs/common';
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { LedgerEntryType, PaymentGateway, PaymentStatus, Prisma, RequestStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PAYMENT_GATEWAY_SERVICE, PaymentGatewayService } from './payment-gateway.interface';
+import { NotificationsService } from '../notifications/notifications.service';
+import { WalletService } from '../wallet/wallet.service';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService, @Inject(PAYMENT_GATEWAY_SERVICE) private readonly gateway: PaymentGatewayService) {}
+  constructor(private readonly prisma: PrismaService, @Inject(PAYMENT_GATEWAY_SERVICE) private readonly gateway: PaymentGatewayService, @Optional() private readonly notifications?: NotificationsService) {}
 
   async initialize(customerId: string, requestId: string) {
     const request = await this.prisma.serviceRequest.findFirst({ where: { id: requestId, customerId }, include: { customer: true } });
     if (!request) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
+    if (request.paymentMode === 'CASH') throw new BadRequestException({ code: 'CASH_PAYMENT_SELECTED', message: 'This request will be paid in cash to the provider' });
     const allowed = request.paymentMode === 'ONLINE_AFTER_ACCEPT'
       ? new Set<RequestStatus>([RequestStatus.ASSIGNED, RequestStatus.EN_ROUTE, RequestStatus.ARRIVED]).has(request.status)
       : request.status === RequestStatus.COMPLETED;
@@ -21,6 +24,51 @@ export class PaymentsService {
     try {
       const initialized = await this.gateway.initialize({ reference, amountKobo: request.priceKobo, email: request.customer.email || `${request.customer.phone.replace('+', '')}@pay.roadaid.co`, requestId });
       return { reference, authorizationUrl: initialized.authorizationUrl, amountKobo: request.priceKobo };
+    } catch (error) {
+      await this.prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.FAILED } });
+      throw error;
+    }
+  }
+
+  async collectCash(providerId: string, requestId: string) {
+    const payment = await this.prisma.$transaction(async (tx) => {
+      const [request] = await tx.$queryRaw<Array<{ id: string; code: string; customer_id: string; provider_id: string | null; status: RequestStatus; payment_mode: string; payment_status: PaymentStatus; price_kobo: bigint; commission_bps: number }>>`
+        SELECT id, code, customer_id, provider_id, status, payment_mode, payment_status, price_kobo, commission_bps FROM service_requests WHERE id=${requestId}::uuid FOR UPDATE`;
+      if (!request || request.provider_id !== providerId) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Active job not found' });
+      if (request.payment_mode !== 'CASH') throw new BadRequestException({ code: 'NOT_CASH_REQUEST', message: 'This customer selected in-app payment' });
+      if (!new Set<RequestStatus>([RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS]).has(request.status)) throw new BadRequestException({ code: 'CASH_NOT_DUE', message: 'Confirm cash only after arriving at the customer' });
+      if (request.payment_status === PaymentStatus.PAID) return tx.payment.findFirst({ where: { requestId, status: PaymentStatus.PAID } });
+      const reference = `RA-CASH-${randomUUID()}`;
+      const commission = request.price_kobo * BigInt(request.commission_bps) / 10_000n;
+      const payment = await tx.payment.create({ data: { requestId, customerId: request.customer_id, gateway: PaymentGateway.MANUAL, reference, amountKobo: request.price_kobo, status: PaymentStatus.PAID, paidAt: new Date(), gatewayResponse: { method: 'CASH', collectedBy: providerId } } });
+      await tx.serviceRequest.update({ where: { id: requestId }, data: { paymentStatus: PaymentStatus.PAID } });
+      await tx.ledgerEntry.createMany({ data: [
+        { type: LedgerEntryType.CUSTOMER_PAYMENT, requestId, paymentId: payment.id, amountKobo: request.price_kobo, description: `Cash collected by provider for ${request.code}` },
+        { type: LedgerEntryType.PLATFORM_COMMISSION, requestId, paymentId: payment.id, providerId, amountKobo: -commission, description: `Cash commission owed for ${request.code}` },
+      ] });
+      await tx.providerProfile.update({ where: { userId: providerId }, data: { walletBalanceKobo: { decrement: commission } } });
+      await tx.requestEvent.create({ data: { requestId, type: 'PAYMENT_UPDATE', actorType: 'PROVIDER', actorId: providerId, payload: { status: 'PAID', method: 'CASH', reference, commissionKobo: commission.toString() } } });
+      return payment;
+    });
+    const [row] = await this.prisma.$queryRaw<Array<{ due: bigint }>>`SELECT GREATEST(0, -COALESCE(SUM(amount_kobo), 0))::bigint AS due FROM ledger_entries WHERE provider_id=${providerId}::uuid AND (type='PLATFORM_COMMISSION' OR (type='ADJUSTMENT' AND description LIKE 'Cash commission settlement%'))`;
+    const dueKobo = row?.due ?? 0n;
+    const limitKobo = WalletService.commissionLimitKobo();
+    await this.notifications?.send(providerId, { title: dueKobo >= limitKobo ? 'Commission limit reached' : 'Cash commission recorded', body: dueKobo >= limitKobo ? 'Finish this job, then repay commission before you can receive another offer.' : 'Your cash commission balance has been updated. Repay it from Account & earnings.', data: { type: 'COMMISSION_REPAYMENT_DUE', dueKobo: dueKobo.toString(), limitKobo: limitKobo.toString() }, priority: 'high' });
+    return payment;
+  }
+
+  async initializeCommissionSettlement(providerId: string, requestId: string) {
+    const request = await this.prisma.serviceRequest.findFirst({ where: { id: requestId, providerId, paymentMode: 'CASH', paymentStatus: PaymentStatus.PAID }, include: { provider: true } });
+    if (!request) throw new NotFoundException({ code: 'CASH_COMMISSION_NOT_FOUND', message: 'Cash commission record not found' });
+    const debt = await this.prisma.ledgerEntry.findFirst({ where: { requestId, providerId, type: LedgerEntryType.PLATFORM_COMMISSION } });
+    const settled = await this.prisma.ledgerEntry.findFirst({ where: { requestId, providerId, type: LedgerEntryType.ADJUSTMENT, description: { startsWith: 'Cash commission settlement' } } });
+    if (!debt || settled) throw new BadRequestException({ code: 'COMMISSION_ALREADY_SETTLED', message: 'This cash commission has already been settled' });
+    const amountKobo = -debt.amountKobo;
+    const reference = `RA-COM-${randomUUID()}`;
+    const payment = await this.prisma.payment.create({ data: { requestId, customerId: providerId, gateway: PaymentGateway.PAYSTACK, reference, amountKobo, status: PaymentStatus.PENDING, idempotencyKey: reference, gatewayResponse: { purpose: 'CASH_COMMISSION_SETTLEMENT', providerId } } });
+    try {
+      const initialized = await this.gateway.initialize({ reference, amountKobo, email: request.provider?.email || `${request.provider?.phone.replace('+', '')}@pay.roadaid.co`, requestId });
+      return { reference, authorizationUrl: initialized.authorizationUrl, amountKobo, requestId };
     } catch (error) {
       await this.prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.FAILED } });
       throw error;
@@ -63,6 +111,20 @@ export class PaymentsService {
       return;
     }
     if (verified.currency !== 'NGN' || verified.amountKobo !== payment.amountKobo) throw new BadRequestException({ code: 'PAYMENT_AMOUNT_MISMATCH', message: 'Verified payment does not match the request amount' });
+    if (reference.startsWith('RA-COM-')) {
+      return this.prisma.$transaction(async (tx) => {
+        const current = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
+        if (current.status === PaymentStatus.PAID) return current;
+        const paid = await tx.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.PAID, paidAt: new Date(), gatewayResponse: verified.response as Prisma.InputJsonValue } });
+        const existing = await tx.ledgerEntry.findFirst({ where: { requestId: payment.requestId, providerId: payment.customerId, type: LedgerEntryType.ADJUSTMENT, description: { startsWith: 'Cash commission settlement' } } });
+        if (!existing) {
+          await tx.ledgerEntry.create({ data: { type: LedgerEntryType.ADJUSTMENT, requestId: payment.requestId, paymentId: payment.id, providerId: payment.customerId, amountKobo: payment.amountKobo, description: `Cash commission settlement ${reference}` } });
+          await tx.providerProfile.update({ where: { userId: payment.customerId }, data: { walletBalanceKobo: { increment: payment.amountKobo } } });
+        }
+        await tx.requestEvent.create({ data: { requestId: payment.requestId, type: 'COMMISSION_SETTLED', actorType: 'PROVIDER', actorId: payment.customerId, payload: { reference, amountKobo: payment.amountKobo.toString() } } });
+        return paid;
+      });
+    }
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
       if (current.status === PaymentStatus.PAID) return current;

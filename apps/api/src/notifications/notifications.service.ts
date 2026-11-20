@@ -8,6 +8,30 @@ export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   constructor(private readonly prisma: PrismaService, private readonly realtime: RealtimeGateway) {}
 
+  list(userId: string) {
+    return this.prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  async markRead(userId: string, id: string) {
+    await this.prisma.notification.updateMany({
+      where: { id, userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { id, read: true };
+  }
+
+  async markAllRead(userId: string) {
+    const result = await this.prisma.notification.updateMany({
+      where: { userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { updated: result.count };
+  }
+
   async send(userId: string, message: { title: string; body: string; data?: Prisma.InputJsonValue; channel?: string; priority?: 'default' | 'high' }) {
     const notification = await this.prisma.notification.create({ data: { userId, title: message.title, body: message.body, data: message.data } });
     this.realtime.emitNotification(userId, notification);

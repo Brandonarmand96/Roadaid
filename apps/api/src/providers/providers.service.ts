@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.interface';
@@ -19,6 +20,7 @@ import {
   LocationUpdateDto,
   locationUpdateSchema,
 } from '@roadaid/shared';
+import { WalletService } from '../wallet/wallet.service';
 
 @Injectable()
 export class ProvidersService {
@@ -27,6 +29,7 @@ export class ProvidersService {
     private readonly prisma: PrismaService,
     @Inject('STORAGE_SERVICE') private readonly storage: StorageService,
     private readonly realtimeGateway: RealtimeGateway,
+    @Optional() private readonly wallet?: WalletService,
   ) {}
 
   async getProfile(userId: string) {
@@ -300,6 +303,8 @@ export class ProvidersService {
 
     // ONLINE Invariants enforcement
     if (state === ProviderAvailability.ONLINE) {
+      const commission = await this.wallet?.commissionPolicy(providerId);
+      if (commission?.blocked) throw new BadRequestException({ code: 'CASH_COMMISSION_LIMIT_REACHED', message: 'Repay your outstanding cash commission before going online again.' });
       if (profile.onboardingStatus !== OnboardingStatus.APPROVED) {
         throw new BadRequestException({
           code: 'PROVIDER_NOT_APPROVED',

@@ -27,6 +27,14 @@ describe('Request feedback authorization', () => {
     await expect(service.create('provider-1', {} as any)).rejects.toMatchObject({ response: { code: 'PROVIDER_MUST_BE_OFFLINE' } });
   });
 
+  it('rejects scheduled dispatch less than 30 minutes away before writing', async () => {
+    await expect(service.create('customer-1', { scheduledFor: new Date(Date.now() + 10 * 60_000).toISOString() } as any)).rejects.toMatchObject({ response: { code: 'INVALID_SCHEDULE_TIME' } });
+  });
+
+  it('rejects scheduled dispatch more than 30 days away before writing', async () => {
+    await expect(service.create('customer-1', { scheduledFor: new Date(Date.now() + 31 * 24 * 60 * 60_000).toISOString() } as any)).rejects.toMatchObject({ response: { code: 'INVALID_SCHEDULE_TIME' } });
+  });
+
   it('updates a completed request and provider aggregate once', async () => {
     tx.$queryRaw.mockResolvedValue([{ status: RequestStatus.COMPLETED, customer_id: 'customer-1', provider_id: 'provider-1', rating_customer_to_provider: null }]);
     tx.providerProfile.findUniqueOrThrow.mockResolvedValue({ ratingAvg: new Prisma.Decimal('4.50'), ratingCount: 2 });

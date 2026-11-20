@@ -12,6 +12,8 @@ import { PricingModule } from './pricing/pricing.module';
 import { RequestsModule } from './requests/requests.module';
 import { PaymentsModule } from './payments/payments.module';
 import { WalletModule } from './wallet/wallet.module';
+import { MapsModule } from './maps/maps.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { WalletModule } from './wallet/wallet.module';
     RequestsModule,
     PaymentsModule,
     WalletModule,
+    MapsModule,
+    SupportModule,
   ],
 })
 export class AppModule {}

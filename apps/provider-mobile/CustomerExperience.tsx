@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
+  Share,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -19,14 +21,16 @@ import * as Location from "expo-location";
 import { FuelType, LockType, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
 import MapView, { Marker, Polyline } from "react-native-maps";
-import { Bike, Crosshair, History, LogOut, Phone, Truck, Wrench } from "lucide-react-native";
+import { Bell, Bike, Crosshair, History, LogOut, Phone, Truck, Wrench } from "lucide-react-native";
+import LocationPicker from "./LocationPicker";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
 const rawApi = (
   process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:3000"
 ).replace(/\/+$/, "");
 const API = rawApi.endsWith("/v1") ? rawApi : `${rawApi}/v1`;
-type Screen = "home" | "details" | "quote" | "history";
+type Screen = "home" | "details" | "location" | "quote" | "history" | "notifications" | "support";
+type InboxNotification = { id: string; title: string; body: string; readAt?: string | null; createdAt: string; data?: { requestId?: string; type?: string } | null };
 type Quote = {
   priceKobo: number;
   breakdown: { baseKobo: number; variableKobo: number };
@@ -46,13 +50,19 @@ type RoadRequest = {
   etaSeconds?: number | null;
   ratingCustomerToProvider?: number | null;
   disputeFlag?: boolean;
-  provider?: { fullName?: string; phone: string } | null;
+  provider?: { fullName?: string; phone: string; avatarUrl?: string | null; providerProfile?: { ratingAvg?: number | string; ratingCount: number; completedJobs: number; vehicleMake?: string | null; vehicleModel?: string | null; vehiclePlate?: string | null; onboardingStatus: string } } | null;
+  pickupPin?: string | null;
+  shareToken?: string | null;
+  beneficiaryName?: string | null;
+  beneficiaryPhone?: string | null;
+  scheduledFor?: string | null;
   payments?: Array<{
     reference: string;
     gateway: string;
     status: string;
     paidAt?: string | null;
   }>;
+  events?: Array<{ type: string; createdAt: string; payload?: Record<string, unknown> }>;
 };
 type ProviderPosition = {
   requestId: string;
@@ -96,6 +106,7 @@ export default function CustomerExperience({
   const [error, setError] = useState(notice ?? "");
   const [quote, setQuote] = useState<Quote>();
   const [history, setHistory] = useState<RoadRequest[]>([]);
+  const [notifications, setNotifications] = useState<InboxNotification[]>([]);
   const [pickup, setPickup] = useState({
     lat: 9.0765,
     lng: 7.3986,
@@ -113,6 +124,14 @@ export default function CustomerExperience({
   const [notes, setNotes] = useState("");
   const [rating, setRating] = useState("5");
   const [feedback, setFeedback] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"ONLINE" | "CASH">("ONLINE");
+  const [bookingForOther, setBookingForOther] = useState(false);
+  const [beneficiary, setBeneficiary] = useState({ name: "", phone: "+234" });
+  const [scheduleChoice, setScheduleChoice] = useState<"NOW" | "IN_1_HOUR" | "TOMORROW">("NOW");
+  const [support, setSupport] = useState({ subject: "", message: "" });
+  const [locationTarget, setLocationTarget] = useState<"PICKUP" | "DESTINATION">("PICKUP");
+  const [pendingPayment, setPendingPayment] = useState<{ requestId: string; reference: string }>();
+  const [paymentChecking, setPaymentChecking] = useState(false);
   const [positions, setPositions] = useState<Record<string, ProviderPosition>>(
     {},
   );
@@ -168,6 +187,26 @@ export default function CustomerExperience({
     const timer = setInterval(() => setClock((value) => value + 1), 15000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (!pendingPayment) return;
+    let active = true;
+    const verify = async () => {
+      if (AppState.currentState !== "active") return;
+      setPaymentChecking(true);
+      try {
+        const payment = await request<{ status: string }>(`/payments/${encodeURIComponent(pendingPayment.reference)}/status`, {}, token);
+        if (payment.status === "PAID" && active) {
+          setHistory(await request<RoadRequest[]>("/requests", {}, token));
+          setPendingPayment(undefined);
+        }
+      } catch { /* polling and realtime will retry without starting another charge */ }
+      finally { if (active) setPaymentChecking(false); }
+    };
+    void verify();
+    const timer = setInterval(() => void verify(), 2500);
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void verify(); });
+    return () => { active = false; clearInterval(timer); subscription.remove(); };
+  }, [pendingPayment, token]);
   async function act(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -205,11 +244,9 @@ export default function CustomerExperience({
       const point = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-      setPickup((p) => ({
-        ...p,
-        lat: point.coords.latitude,
-        lng: point.coords.longitude,
-      }));
+      const next = { lat: point.coords.latitude, lng: point.coords.longitude };
+      const resolved = await request<{ lat: number; lng: number; address: string }>("/maps/reverse", { method: "POST", body: JSON.stringify(next) }, token).catch(() => ({ ...next, address: `${next.lat.toFixed(5)}, ${next.lng.toFixed(5)}` }));
+      setPickup((p) => ({ ...p, ...resolved }));
     });
   }
   async function getQuote() {
@@ -239,6 +276,17 @@ export default function CustomerExperience({
       setScreen("history");
     });
   }
+  async function loadNotifications() {
+    await act(async () => {
+      setNotifications(await request<InboxNotification[]>("/notifications", {}, token));
+      setScreen("notifications");
+    });
+  }
+  async function readNotification(item: InboxNotification) {
+    await request(`/notifications/${item.id}/read`, { method: "POST" }, token);
+    setNotifications((items) => items.map((current) => current.id === item.id ? { ...current, readAt: new Date().toISOString() } : current));
+    if (item.data?.requestId) setScreen("home");
+  }
   async function create() {
     if (!service) return;
     await act(async () => {
@@ -248,8 +296,11 @@ export default function CustomerExperience({
           method: "POST",
           body: JSON.stringify({
             serviceType: service,
+            paymentMethod,
             pickup,
             details: details(),
+            beneficiary: bookingForOther ? beneficiary : undefined,
+            scheduledFor: scheduleChoice === "NOW" ? undefined : new Date(Date.now() + (scheduleChoice === "IN_1_HOUR" ? 60 * 60_000 : 24 * 60 * 60_000)).toISOString(),
           }),
         },
         token,
@@ -258,8 +309,26 @@ export default function CustomerExperience({
       setScreen("home");
     });
   }
-  async function cancel(id: string) {
+  async function shareRequest(item: RoadRequest) {
+    const statusUrl = item.shareToken ? `${API}/public/requests/${item.shareToken}` : undefined;
+    await Share.share({
+      title: `RoadAid ${item.code}`,
+      message: [`Track my RoadAid request ${item.code}.`, `Status: ${item.status.replaceAll("_", " ")}.`, item.pickupAddress, statusUrl].filter(Boolean).join("\n"),
+      url: statusUrl,
+    });
+  }
+  async function createSupportCase() {
     await act(async () => {
+      await request("/support/cases", { method: "POST", body: JSON.stringify(support) }, token);
+      setSupport({ subject: "", message: "" });
+      setScreen("home");
+      Alert.alert("Support request received", "RoadAid Operations can now review your message.");
+    });
+  }
+  async function cancel(id: string) {
+    Alert.alert("Cancel this request?", "RoadAid will stop matching or release the assigned responder.", [
+      { text: "Keep request", style: "cancel" },
+      { text: "Cancel request", style: "destructive", onPress: () => void act(async () => {
       await request(
         `/requests/${id}/cancel`,
         {
@@ -271,15 +340,17 @@ export default function CustomerExperience({
         token,
       );
       setHistory(await request<RoadRequest[]>("/requests", {}, token));
-    });
+      }) },
+    ]);
   }
   async function pay(id: string) {
     await act(async () => {
-      const initialized = await request<{ authorizationUrl: string }>(
+      const initialized = await request<{ authorizationUrl: string; reference: string }>(
         "/payments/initialize",
         { method: "POST", body: JSON.stringify({ requestId: id }) },
         token,
       );
+      setPendingPayment({ requestId: id, reference: initialized.reference });
       await Linking.openURL(initialized.authorizationUrl);
     });
   }
@@ -313,6 +384,14 @@ export default function CustomerExperience({
   const activeRequest = history.find((item) =>
     ["REQUESTED", "SEARCHING", "ASSIGNED", "EN_ROUTE", "ARRIVED", "IN_PROGRESS", "ESCALATED"].includes(item.status),
   );
+  if (screen === "location") {
+    const destination = { lat: Number(tow.lat), lng: Number(tow.lng), address: tow.address };
+    return <LocationPicker title={locationTarget === "PICKUP" ? "Confirm pickup" : "Confirm towing destination"} initial={locationTarget === "PICKUP" ? pickup : destination} token={token} apiRequest={request} onCancel={() => setScreen("details")} onConfirm={(point) => {
+      if (locationTarget === "PICKUP") setPickup((current) => ({ ...current, ...point }));
+      else setTow((current) => ({ ...current, address: point.address, lat: String(point.lat), lng: String(point.lng) }));
+      setScreen("details");
+    }} />;
+  }
   if (screen === "home" && activeRequest) {
     const position = positions[activeRequest.id];
     const ageSeconds = position
@@ -329,6 +408,9 @@ export default function CustomerExperience({
         busy={busy}
         error={error}
         paymentDue={paymentDue}
+        paymentChecking={paymentChecking || pendingPayment?.requestId === activeRequest.id}
+        token={token}
+        apiRequest={request}
         onPay={() => void pay(activeRequest.id)}
         onCancel={() => void cancel(activeRequest.id)}
         onHistory={() => setScreen("history")}
@@ -346,6 +428,8 @@ export default function CustomerExperience({
         onLocate={() => void locate()}
         onService={(next) => { setService(next); setScreen("details"); }}
         onHistory={() => void loadHistory()}
+        onNotifications={() => void loadNotifications()}
+        onSupport={() => setScreen("support")}
         onSignOut={onSignOut}
         onProviderMode={onProviderMode}
       />
@@ -404,7 +488,9 @@ export default function CustomerExperience({
                   label="Destination address"
                   value={tow.address}
                   onChangeText={(address) => setTow({ ...tow, address })}
+                  placeholder="Search or choose on map"
                 />
+                <SecondaryButton label="Choose destination on map" onPress={() => { setLocationTarget("DESTINATION"); setScreen("location"); }} />
                 <Field
                   label="Vehicle condition"
                   value={tow.vehicleCondition}
@@ -435,11 +521,19 @@ export default function CustomerExperience({
               onChangeText={(address) => setPickup({ ...pickup, address })}
               placeholder="Street, landmark, district"
             />
+            <SecondaryButton label="Choose pickup on map" onPress={() => { setLocationTarget("PICKUP"); setScreen("location"); }} />
             <Field
               label="Pickup note (optional)"
               value={pickup.note}
               onChangeText={(note) => setPickup({ ...pickup, note })}
             />
+            <Text style={s.label}>Who needs help?</Text>
+            <Choices values={["MYSELF", "SOMEONE_ELSE"]} value={bookingForOther ? "SOMEONE_ELSE" : "MYSELF"} onChange={(value) => setBookingForOther(value === "SOMEONE_ELSE")} />
+            {bookingForOther ? <>
+              <Field label="Person’s name" value={beneficiary.name} onChangeText={(name) => setBeneficiary({ ...beneficiary, name })} maxLength={120} />
+              <Field label="Person’s Nigerian phone" value={beneficiary.phone} onChangeText={(phone) => setBeneficiary({ ...beneficiary, phone })} keyboardType="phone-pad" maxLength={14} />
+              <Text style={s.muted}>The responder will see this contact for the roadside handoff. Your account remains responsible for payment and the request.</Text>
+            </> : null}
             <Link
               label="Use my current GPS location"
               onPress={() => void locate()}
@@ -455,6 +549,25 @@ export default function CustomerExperience({
             />
           </Section>
         )}
+        {screen === "notifications" && (
+          <Section title="Notifications" intro="Important request, payment, safety, and account updates stay here even after the push alert closes.">
+            <Link label="Mark all as read" onPress={() => void act(async () => { await request("/notifications/read-all", { method: "POST" }, token); setNotifications((items) => items.map((item) => ({ ...item, readAt: item.readAt ?? new Date().toISOString() }))); })} />
+            {notifications.length ? notifications.map((item) => (
+              <Pressable key={item.id} accessibilityRole="button" onPress={() => void readNotification(item)} style={[s.notice, !item.readAt && { borderColor: "#D38A1C" }]}>
+                <Text style={s.noticeTitle}>{item.title}{item.readAt ? "" : " · New"}</Text>
+                <Text style={s.noticeBody}>{item.body}</Text>
+                <Text style={s.muted}>{new Date(item.createdAt).toLocaleString("en-NG")}</Text>
+              </Pressable>
+            )) : <Notice title="You’re all caught up" body="New request and payment updates will appear here." />}
+          </Section>
+        )}
+        {screen === "support" && (
+          <Section title="Contact RoadAid support" intro="Send Operations the details needed to investigate. For immediate danger, contact local emergency services first.">
+            <Field label="Subject" value={support.subject} onChangeText={(subject) => setSupport({ ...support, subject })} maxLength={160} />
+            <Field label="What happened?" value={support.message} onChangeText={(message) => setSupport({ ...support, message })} multiline maxLength={3000} />
+            <Button label="Send to Operations" busy={busy} disabled={!support.subject.trim() || support.message.trim().length < 10} onPress={() => void createSupportCase()} />
+          </Section>
+        )}
         {screen === "quote" && quote && service && (
           <Section
             title="Review before requesting"
@@ -462,6 +575,8 @@ export default function CustomerExperience({
           >
             <Summary label="Service" value={service} />
             <Summary label="Pickup" value={pickup.address} />
+            {bookingForOther ? <Summary label="Helping" value={`${beneficiary.name} · ${beneficiary.phone}`} /> : null}
+            <Summary label="Payment" value={paymentMethod === "CASH" ? "Cash to provider" : "Pay securely in RoadAid"} />
             <Summary label="Base" value={money(quote.breakdown.baseKobo)} />
             <Summary
               label="Service charge"
@@ -471,10 +586,17 @@ export default function CustomerExperience({
               <Text style={s.totalLabel}>Total</Text>
               <Text style={s.totalValue}>{money(quote.priceKobo)}</Text>
             </View>
+            <Text style={s.label}>How would you like to pay?</Text>
+            <Choices values={["ONLINE", "CASH"]} value={paymentMethod} onChange={(value) => setPaymentMethod(value as "ONLINE" | "CASH")} />
+            <Text style={s.muted}>{paymentMethod === "CASH" ? "Pay the exact total directly to your responder after they arrive. RoadAid will still issue a receipt." : "Pay securely in the app after a responder accepts."}</Text>
+            <Text style={s.label}>When do you need help?</Text>
+            <Choices values={["NOW", "IN_1_HOUR", "TOMORROW"]} value={scheduleChoice} onChange={(value) => setScheduleChoice(value as typeof scheduleChoice)} />
+            {scheduleChoice !== "NOW" ? <Text style={s.muted}>RoadAid will begin matching responders at {new Date(Date.now() + (scheduleChoice === "IN_1_HOUR" ? 60 * 60_000 : 24 * 60 * 60_000)).toLocaleString("en-NG")}.</Text> : null}
             <Button
               label="Request assistance"
               busy={busy}
               onPress={() => void create()}
+              disabled={bookingForOther && (beneficiary.name.trim().length < 2 || !/^\+234\d{10}$/.test(beneficiary.phone))}
             />
             <Link label="Change details" onPress={() => setScreen("details")} />
           </Section>
@@ -514,6 +636,9 @@ export default function CustomerExperience({
                     </Text>
                     <Text style={s.muted}>{item.pickupAddress}</Text>
                     <Text style={s.muted}>Payment: {item.paymentStatus}</Text>
+                    {item.scheduledFor ? <Text style={s.muted}>Scheduled: {new Date(item.scheduledFor).toLocaleString("en-NG")}</Text> : null}
+                    {item.beneficiaryName ? <Text style={s.muted}>Roadside contact: {item.beneficiaryName} · {item.beneficiaryPhone}</Text> : null}
+                    {item.shareToken ? <SecondaryButton label="Share live request status" onPress={() => void shareRequest(item)} /> : null}
                     {item.provider && (
                       <ActiveTracking
                         request={item}
@@ -621,13 +746,15 @@ export default function CustomerExperience({
   );
 }
 
-function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, onSignOut, onProviderMode }: {
+function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, onNotifications, onSupport, onSignOut, onProviderMode }: {
   pickup: { lat: number; lng: number; address: string };
   busy: boolean;
   error: string;
   onLocate: () => void;
   onService: (service: ServiceType) => void;
   onHistory: () => void;
+  onNotifications: () => void;
+  onSupport: () => void;
   onSignOut: () => void;
   onProviderMode?: () => void;
 }) {
@@ -637,7 +764,7 @@ function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, 
         <StatusBar barStyle="dark-content" />
         <MapView
           style={StyleSheet.absoluteFill}
-          region={{ latitude: pickup.lat, longitude: pickup.lng, latitudeDelta: 0.045, longitudeDelta: 0.045 }}
+          initialRegion={{ latitude: pickup.lat, longitude: pickup.lng, latitudeDelta: 0.045, longitudeDelta: 0.045 }}
           showsUserLocation
           showsMyLocationButton={false}
           toolbarEnabled={false}
@@ -650,9 +777,10 @@ function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, 
               <Image source={require("./assets/roadaid-mark.png")} style={s.compactLogo} resizeMode="contain" />
               <View><Text style={s.compactBrandName}>RoadAid</Text><Text style={s.compactTagline}>BUILT FOR CERTAINTY</Text></View>
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => confirmSignOut(onSignOut)} style={s.roundAction}>
-              <LogOut color="#191D23" size={22} />
-            </Pressable>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={onNotifications} style={s.roundAction}><Bell color="#191D23" size={22} /></Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => confirmSignOut(onSignOut)} style={s.roundAction}><LogOut color="#191D23" size={22} /></Pressable>
+            </View>
           </View>
         </SafeAreaView>
         <Pressable accessibilityRole="button" accessibilityLabel="Use my current location" onPress={onLocate} disabled={busy} style={s.locateFab}>
@@ -672,6 +800,7 @@ function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, 
             </View>
             <View style={s.sheetActions}>
               <Pressable accessibilityRole="button" accessibilityLabel="Open request activity" onPress={onHistory} style={s.secondaryAction}><History color="#191D23" size={20} /><Text style={s.secondaryActionText}>Activity</Text></Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Contact support" onPress={onSupport} style={s.secondaryAction}><Phone color="#191D23" size={20} /><Text style={s.secondaryActionText}>Help</Text></Pressable>
               {onProviderMode ? <Pressable accessibilityRole="button" accessibilityLabel="Switch to Provider mode" onPress={onProviderMode} style={s.secondaryAction}><Truck color="#191D23" size={20} /><Text style={s.secondaryActionText}>Provider mode</Text></Pressable> : null}
             </View>
             </ScrollView>
@@ -686,25 +815,47 @@ function QuickService({ service, label, icon, onPress }: { service: ServiceType;
   return <Pressable accessibilityRole="button" onPress={() => onPress(service)} style={s.quickService}><View style={s.quickServiceIcon}>{icon}</View><Text style={s.quickServiceLabel}>{label}</Text></Pressable>;
 }
 
-function CustomerActiveMap({ request, position, ageSeconds, busy, error, paymentDue, onPay, onCancel, onHistory, onSignOut, onProviderMode }: {
-  request: RoadRequest; position?: ProviderPosition; ageSeconds: number | null; busy: boolean; error: string; paymentDue: boolean;
+function CustomerActiveMap({ request, position, ageSeconds, busy, error, paymentDue, paymentChecking, token, apiRequest, onPay, onCancel, onHistory, onSignOut, onProviderMode }: {
+  request: RoadRequest; position?: ProviderPosition; ageSeconds: number | null; busy: boolean; error: string; paymentDue: boolean; paymentChecking: boolean;
+  token: string; apiRequest: <T>(path: string, options?: RequestInit, token?: string) => Promise<T>;
   onPay: () => void; onCancel: () => void; onHistory: () => void; onSignOut: () => void; onProviderMode?: () => void;
 }) {
+  const mapRef = useRef<MapView>(null);
+  const [route, setRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const presentation = servicePresentation(request.serviceType);
   const pickup = { latitude: request.pickupLat || 9.0765, longitude: request.pickupLng || 7.3986 };
   const provider = position ? { latitude: position.lat, longitude: position.lng } : undefined;
   const center = provider ?? pickup;
   const stale = ageSeconds !== null && ageSeconds > 30;
   const disconnected = ageSeconds !== null && ageSeconds > 120;
-  const headline = request.status === "ARRIVED" ? "Your responder has arrived" : request.status === "IN_PROGRESS" ? "Service in progress" : ["ASSIGNED", "EN_ROUTE"].includes(request.status) ? "Your responder is on the way" : request.status === "ESCALATED" ? "Operations is finding another responder" : "Finding the best responder";
+  const waitingForSchedule = request.status === "REQUESTED" && request.scheduledFor && Date.parse(request.scheduledFor) > Date.now();
+  const headline = waitingForSchedule ? "Your assistance is scheduled" : request.status === "ARRIVED" ? "Your responder has arrived" : request.status === "IN_PROGRESS" ? "Service in progress" : ["ASSIGNED", "EN_ROUTE"].includes(request.status) ? "Your responder is on the way" : request.status === "ESCALATED" ? "Operations is finding another responder" : "Finding the best responder";
+  const latestDispatchEvent = [...(request.events ?? [])].reverse().find((event) => ["OFFER_SENT", "OFFER_DECLINED", "OFFER_EXPIRED", "DISPATCH_ESCALATED"].includes(event.type));
+  const dispatchMessage = waitingForSchedule ? `Matching begins ${new Date(request.scheduledFor!).toLocaleString("en-NG")}` : request.status === "SEARCHING"
+    ? latestDispatchEvent?.type === "OFFER_SENT" ? "A nearby responder is reviewing your request"
+      : latestDispatchEvent?.type === "OFFER_DECLINED" || latestDispatchEvent?.type === "OFFER_EXPIRED" ? "That responder was unavailable; trying the next nearby responder"
+      : "Checking nearby approved responders"
+    : request.status === "ESCALATED" ? "Operations is expanding the search and monitoring your request" : undefined;
+  useEffect(() => {
+    if (!provider) { setRoute([]); return; }
+    let active = true;
+    void apiRequest<{ points: Array<{ lat: number; lng: number }> }>("/maps/route", { method: "POST", body: JSON.stringify({ origin: { lat: provider.latitude, lng: provider.longitude }, destination: { lat: pickup.latitude, lng: pickup.longitude } }) }, token)
+      .then((value) => {
+        if (!active) return;
+        const points = value.points.map((item) => ({ latitude: item.lat, longitude: item.lng }));
+        setRoute(points);
+        requestAnimationFrame(() => mapRef.current?.fitToCoordinates(points.length > 1 ? points : [provider, pickup], { edgePadding: { top: 110, right: 50, bottom: 350, left: 50 }, animated: true }));
+      }).catch(() => setRoute([provider, pickup]));
+    return () => { active = false; };
+  }, [position?.lat, position?.lng, request.id, token]);
   return (
     <SafeAreaProvider>
       <View style={s.mapShell}>
         <StatusBar barStyle="dark-content" />
-        <MapView style={StyleSheet.absoluteFill} region={{ ...center, latitudeDelta: 0.04, longitudeDelta: 0.04 }} showsCompass={false} toolbarEnabled={false}>
+        <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={{ ...center, latitudeDelta: 0.04, longitudeDelta: 0.04 }} showsCompass={false} toolbarEnabled={false}>
           <Marker coordinate={pickup} title="Pickup" pinColor="#D38A1C" />
           {provider ? <Marker coordinate={provider} title={presentation.role} pinColor="#191D23" /> : null}
-          {provider ? <Polyline coordinates={[provider, pickup]} strokeColor="#D38A1C" strokeWidth={5} /> : null}
+          {route.length > 1 ? <Polyline coordinates={route} strokeColor="#D38A1C" strokeWidth={5} /> : null}
         </MapView>
         <SafeAreaView style={s.mapChrome} edges={["top", "right", "left"]} pointerEvents="box-none">
           <View style={s.floatingBar}><View style={s.tripCode}><Text style={s.tripCodeLabel}>{request.serviceType}</Text><Text style={s.tripCodeValue}>{request.code}</Text></View><Pressable accessibilityRole="button" onPress={onHistory} style={s.roundAction}><History color="#191D23" size={22} /></Pressable></View>
@@ -715,9 +866,14 @@ function CustomerActiveMap({ request, position, ageSeconds, busy, error, payment
             <ScrollView style={s.sheetScroller} contentContainerStyle={s.sheetScrollContent} showsVerticalScrollIndicator={false}>
             <View style={s.activeHeading}><View style={s.activeCopy}><Text style={s.sheetTitle}>{headline}</Text><Text style={s.sheetIntro}>{request.etaSeconds ? `${Math.max(1, Math.ceil(request.etaSeconds / 60))} min estimated arrival` : request.pickupAddress}</Text></View><View style={s.quickServiceIcon}>{presentation.icon}</View></View>
             <View style={[s.liveStrip, (stale || disconnected) && s.liveStripWarning]}><View style={[s.liveDot, (stale || disconnected) && s.liveDotWarning]} /><Text style={s.liveText}>{disconnected ? "Location connection lost" : stale ? "Location update delayed" : provider ? "Responder location is live" : "Waiting for responder location"}</Text></View>
+            {dispatchMessage ? <Text accessibilityLiveRegion="polite" style={s.sheetIntro}>{dispatchMessage}</Text> : null}
             {request.provider ? <View style={s.responderCompact}><View><Text style={s.responderName}>{request.provider.fullName ?? "Verified RoadAid responder"}</Text><Text style={s.responderRole}>{presentation.role}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Call responder" onPress={() => void Linking.openURL(`tel:${request.provider?.phone}`)} style={s.callButton}><Phone color="#191D23" size={21} /></Pressable></View> : null}
+            {request.provider?.providerProfile ? <><Summary label="Verified jobs" value={String(request.provider.providerProfile.completedJobs)} /><Summary label="Rating" value={`${Number(request.provider.providerProfile.ratingAvg ?? 0).toFixed(1)} (${request.provider.providerProfile.ratingCount})`} />{request.provider.providerProfile.vehiclePlate ? <Summary label="Service vehicle" value={`${request.provider.providerProfile.vehicleMake ?? ""} ${request.provider.providerProfile.vehicleModel ?? ""} · ${request.provider.providerProfile.vehiclePlate}`.trim()} /> : null}</> : null}
+            {request.pickupPin && ["ASSIGNED", "EN_ROUTE"].includes(request.status) ? <Notice title={`Pickup PIN: ${request.pickupPin}`} body="Give this PIN only to the verified responder after checking their identity and service vehicle." /> : null}
             {error ? <Notice title="Update failed" body={error} warning /> : null}
-            {paymentDue ? <Button label={`Pay ${money(request.priceKobo)}`} onPress={onPay} busy={busy} /> : null}
+            {request.paymentMode === "CASH" && request.paymentStatus !== "PAID" ? <Notice title={`Cash payment: ${money(request.priceKobo)}`} body="Pay the exact total directly to your verified responder after they arrive. Ask them to confirm receipt in RoadAid." /> : null}
+            {paymentChecking ? <Notice title="Confirming payment" body="We are checking Paystack. Do not pay again or close RoadAid." /> : null}
+            {paymentDue && !paymentChecking ? <Button label={`Pay ${money(request.priceKobo)}`} onPress={onPay} busy={busy} /> : null}
             {["REQUESTED", "SEARCHING", "ESCALATED", "ASSIGNED", "EN_ROUTE"].includes(request.status) ? <Link label="Cancel request" onPress={onCancel} /> : null}
             <View style={s.sheetActions}>{onProviderMode ? <Pressable accessibilityRole="button" accessibilityLabel="Switch to Provider mode" onPress={onProviderMode} style={s.secondaryAction}><Truck color="#191D23" size={20} /><Text style={s.secondaryActionText}>Provider mode</Text></Pressable> : null}<Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => confirmSignOut(onSignOut)} style={s.secondaryAction}><LogOut color="#191D23" size={20} /><Text style={s.secondaryActionText}>Sign out</Text></Pressable></View>
             </ScrollView>
@@ -952,6 +1108,13 @@ function Button({
     </Pressable>
   );
 }
+function SecondaryButton({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={s.secondaryButton}>
+      <Text style={s.secondaryButtonText}>{label}</Text>
+    </Pressable>
+  );
+}
 function Link({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={s.link}>
@@ -1100,6 +1263,8 @@ const s = StyleSheet.create({
   },
   disabled: { opacity: 0.45 },
   buttonText: { color: "#191D23", fontWeight: "900", fontSize: 15 },
+  secondaryButton: { minHeight: 50, borderWidth: 1, borderColor: "#B7BDB5", borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", paddingHorizontal: 14 },
+  secondaryButtonText: { color: "#252A32", fontWeight: "900", fontSize: 14 },
   link: { minHeight: 44, alignItems: "center", justifyContent: "center" },
   linkText: { color: "#83520F", fontWeight: "800" },
   service: {

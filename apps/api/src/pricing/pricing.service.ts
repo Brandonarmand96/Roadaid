@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FuelDetailsDto, QuoteRequestDto, ServiceType, TowingDetailsDto } from '@roadaid/shared';
+import { MapsService } from '../maps/maps.service';
 
 @Injectable()
 export class PricingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly maps: MapsService) {}
 
   async quote(dto: QuoteRequestDto) {
     const rule = await this.prisma.pricingRule.findUnique({ where: { serviceType: dto.serviceType } });
@@ -15,7 +16,7 @@ export class PricingService {
       variableKobo = rule.perLitreKobo * BigInt((dto.details as FuelDetailsDto).litres);
     } else if (dto.serviceType === ServiceType.TOWING) {
       const destination = (dto.details as TowingDetailsDto).destination;
-      distanceMeters = this.haversineMeters(dto.pickup.lat, dto.pickup.lng, destination.lat, destination.lng);
+      distanceMeters = (await this.maps.route(dto.pickup, destination)).distanceMeters;
       const freeMeters = Math.round(rule.towingFreeKm * 1000);
       const chargeableMeters = Math.max(0, distanceMeters - freeMeters);
       variableKobo = (rule.perKmKobo * BigInt(chargeableMeters) + 999n) / 1000n;
@@ -33,13 +34,5 @@ export class PricingService {
         minKobo: Number(rule.minKobo),
       },
     };
-  }
-
-  private haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
-    const rad = Math.PI / 180;
-    const dLat = (bLat - aLat) * rad;
-    const dLng = (bLng - aLng) * rad;
-    const x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLng / 2) ** 2;
-    return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
   }
 }

@@ -2,13 +2,16 @@ import { Test } from '@nestjs/testing';
 import { PricingService } from '../src/pricing/pricing.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { FuelType, LockType, ServiceType } from '@roadaid/shared';
+import { MapsService } from '../src/maps/maps.service';
 
 describe('PricingService', () => {
   let service: PricingService;
   const prisma = { pricingRule: { findUnique: jest.fn() } };
+  const maps = { route: jest.fn() };
   beforeEach(async () => {
     jest.clearAllMocks();
-    service = (await Test.createTestingModule({ providers: [PricingService, { provide: PrismaService, useValue: prisma }] }).compile()).get(PricingService);
+    maps.route.mockResolvedValue({ distanceMeters: 1_112, durationSeconds: 180, points: [], source: 'GOOGLE_ROUTES' });
+    service = (await Test.createTestingModule({ providers: [PricingService, { provide: PrismaService, useValue: prisma }, { provide: MapsService, useValue: maps }] }).compile()).get(PricingService);
   });
 
   it('quotes fuel using integer kobo per litre', async () => {

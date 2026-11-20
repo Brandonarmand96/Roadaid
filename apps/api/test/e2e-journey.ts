@@ -83,13 +83,13 @@ async function main() {
   let realtimeUpdates = 0; socket.on('request.updated', () => realtimeUpdates++);
 
   for (const provider of providers) {
-    const created = await http<{ id: string; code: string; priceKobo: number }>('/requests', { method: 'POST', body: JSON.stringify({ serviceType: provider.service, pickup: { lat: 9.0765, lng: 7.3986, address: 'E2E pickup, Abuja', note: 'Automated Phase 4 journey' }, details: details(provider.service) }) }, customer.accessToken);
+    const created = await http<{ id: string; code: string; priceKobo: number; pickupPin: string }>('/requests', { method: 'POST', body: JSON.stringify({ serviceType: provider.service, pickup: { lat: 9.0765, lng: 7.3986, address: 'E2E pickup, Abuja', note: 'Automated Phase 4 journey' }, details: details(provider.service) }) }, customer.accessToken);
     socket.emit('join:request', { requestId: created.id });
     const offers = await poll('dispatch offer', () => http<Array<{ id: string; requestId: string }>>('/provider/offers', {}, provider.token), (value) => value.some((offer) => offer.requestId === created.id));
     const offer = offers.find((item) => item.requestId === created.id)!;
     await http(`/provider/offers/${offer.id}/accept`, { method: 'POST' }, provider.token);
     await http(`/admin/requests/${created.id}/mark-paid`, { method: 'POST', body: JSON.stringify({ reason: 'Phase 4 automated paid journey' }) }, admin.accessToken);
-    for (const status of ['EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'COMPLETED']) await http(`/provider/jobs/${created.id}/status`, { method: 'POST', body: JSON.stringify({ status }) }, provider.token);
+    for (const status of ['EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'COMPLETED']) await http(`/provider/jobs/${created.id}/status`, { method: 'POST', body: JSON.stringify({ status, pickupPin: status === 'ARRIVED' ? created.pickupPin : undefined }) }, provider.token);
     const completed = await http<{ status: string; paymentStatus: string }>('/requests/' + created.id, {}, customer.accessToken);
     if (completed.status !== 'COMPLETED' || completed.paymentStatus !== 'PAID') throw new Error(`${provider.service}: terminal state mismatch`);
     const entries = await prisma.ledgerEntry.findMany({ where: { requestId: created.id } });

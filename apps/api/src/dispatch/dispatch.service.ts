@@ -6,6 +6,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RequestStateService } from '../requests/request-state.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { WalletService } from '../wallet/wallet.service';
+import { verifyPickupPin } from '../requests/pickup-pin';
 
 type LockedRequest = { id: string; status: RequestStatus; service_type: ServiceType; offers_made_count: number; search_started_at: Date; dispatch_round: number };
 type Candidate = { user_id: string; dist_m: number; completed_jobs: number };
@@ -25,7 +27,7 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
     this.nextQueue = new Queue('dispatch-next', { connection: this.connection });
     this.expiryQueue = new Queue('offer-expire', { connection: this.connection });
     this.workers = [
-      new Worker('dispatch-next', (job) => this.dispatchNext(job.data.requestId), { connection: this.connection }),
+      new Worker('dispatch-next', (job) => job.name === 'dispatch:start' ? this.start(job.data.requestId) : this.dispatchNext(job.data.requestId), { connection: this.connection }),
       new Worker('offer-expire', (job) => this.expireOffer(job.data.offerId), { connection: this.connection }),
     ];
     this.sweepTimer = setInterval(() => void this.sweep(), 15_000);
@@ -46,12 +48,23 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
     await this.enqueueNext(requestId, 0);
   }
 
+  async schedule(requestId: string, scheduledFor: Date) {
+    if (!this.nextQueue) return;
+    await this.nextQueue.add('dispatch:start', { requestId }, {
+      jobId: `dispatch-start-${requestId}`,
+      delay: Math.max(0, scheduledFor.getTime() - Date.now()),
+      removeOnComplete: true,
+      removeOnFail: 100,
+    });
+  }
+
   async enqueueNext(requestId: string, count: number, delay = 0) {
     if (!this.nextQueue) return;
     await this.nextQueue.add('dispatch:next', { requestId }, { jobId: `dispatch-next-${requestId}-${count}`, delay, removeOnComplete: true, removeOnFail: 100 });
   }
 
   async dispatchNext(requestId: string) {
+    const cashCommissionLimit = WalletService.commissionLimitKobo();
     const outcome = await this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<LockedRequest[]>`
         SELECT id, status, service_type, offers_made_count, search_started_at, dispatch_round
@@ -71,6 +84,7 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
         JOIN users u ON u.id=pp.user_id AND u.status='ACTIVE'
         JOIN provider_locations pl ON pl.provider_id=pp.user_id
         WHERE sr.id=${requestId}::uuid AND pp.onboarding_status='APPROVED' AND pp.availability='ONLINE' AND pp.current_request_id IS NULL
+          AND COALESCE((SELECT -SUM(le.amount_kobo) FROM ledger_entries le WHERE le.provider_id=pp.user_id AND (le.type='PLATFORM_COMMISSION' OR (le.type='ADJUSTMENT' AND le.description LIKE 'Cash commission settlement%'))), 0) < ${cashCommissionLimit}
           AND pl.received_at > now() - make_interval(secs => ${settings.staleLocationSeconds}) AND pl.accuracy_m <= 200
           AND ST_DWithin(pl.location, sr.pickup_location, ${settings.searchRadiusKm * 1000})
           AND NOT EXISTS (SELECT 1 FROM dispatch_offers o WHERE o.request_id=sr.id AND o.provider_id=pp.user_id AND o.round=${request.dispatch_round})
@@ -84,6 +98,7 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
           JOIN provider_locations pl ON pl.provider_id=pp.user_id
           JOIN users u ON u.id=pp.user_id AND u.status='ACTIVE'
           WHERE sr.id=${requestId}::uuid AND pl.received_at > now() - make_interval(secs => ${settings.staleLocationSeconds}) AND pl.accuracy_m <= 200
+          AND COALESCE((SELECT -SUM(le.amount_kobo) FROM ledger_entries le WHERE le.provider_id=pp.user_id AND (le.type='PLATFORM_COMMISSION' OR (le.type='ADJUSTMENT' AND le.description LIKE 'Cash commission settlement%'))), 0) < ${cashCommissionLimit}
           AND ST_DWithin(pl.location, sr.pickup_location, ${settings.searchRadiusKm * 1000})`;
         if (Number(visibleEligible[0]?.count || 0) > 0) return { kind: 'retry' as const, count: request.offers_made_count };
         return this.escalateTx(tx, requestId, 'NO_ELIGIBLE_PROVIDER');
@@ -163,7 +178,18 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
       this.prisma.$queryRaw<Array<{ now: Date }>>`SELECT now() AS now`,
     ]);
     const serverNow = (serverClock[0]?.now ?? new Date()).toISOString();
-    return offers.map((offer) => ({ ...offer, serverNow }));
+    return offers.map((offer) => {
+      const commissionKobo = offer.request.priceKobo * BigInt(offer.request.commissionBps) / 10_000n;
+      return {
+        ...offer,
+        request: {
+          ...offer.request,
+          commissionKobo,
+          providerNetKobo: offer.request.priceKobo - commissionKobo,
+        },
+        serverNow,
+      };
+    });
   }
 
   async currentJob(providerId: string) {
@@ -176,13 +202,58 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
       SELECT ST_Y(pickup_location::geometry)::float AS pickup_lat,
              ST_X(pickup_location::geometry)::float AS pickup_lng
       FROM service_requests WHERE id=${job.id}::uuid`;
-    return { ...job, pickupLat: points[0]?.pickup_lat, pickupLng: points[0]?.pickup_lng };
+    const safeJob = { ...job };
+    delete safeJob.pickupPinHash;
+    delete safeJob.pickupPinEncrypted;
+    delete safeJob.shareToken;
+    return { ...safeJob, pickupLat: points[0]?.pickup_lat, pickupLng: points[0]?.pickup_lng };
   }
 
-  async updateJobStatus(providerId: string, requestId: string, to: RequestStatus) {
+  jobHistory(providerId: string) {
+    return this.prisma.serviceRequest.findMany({
+      where: { providerId, status: { in: [RequestStatus.COMPLETED, RequestStatus.CANCELLED] } },
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+      select: {
+        id: true, code: true, serviceType: true, status: true, pickupAddress: true,
+        priceKobo: true, paymentMode: true, paymentStatus: true, completedAt: true,
+        cancelledAt: true, providerRatingToCustomer: true, providerReviewText: true,
+        beneficiaryName: true,
+        customer: { select: { fullName: true } },
+      },
+    });
+  }
+
+  async rateCustomer(providerId: string, requestId: string, rating: number, review?: string) {
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5)
+      throw new ConflictException({ code: 'INVALID_RATING', message: 'Rating must be an integer from 1 to 5' });
+    const cleanReview = review?.trim();
+    if (cleanReview && cleanReview.length > 1000)
+      throw new ConflictException({ code: 'REVIEW_TOO_LONG', message: 'Review must not exceed 1000 characters' });
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ status: RequestStatus; provider_id: string | null; rating_provider_to_customer: number | null }>>`
+        SELECT status, provider_id, rating_provider_to_customer FROM service_requests WHERE id=${requestId}::uuid FOR UPDATE`;
+      const request = rows[0];
+      if (!request || request.provider_id !== providerId)
+        throw new ConflictException({ code: 'JOB_NOT_ASSIGNED', message: 'This job is not assigned to you' });
+      if (request.status !== RequestStatus.COMPLETED)
+        throw new ConflictException({ code: 'RATING_NOT_ALLOWED', message: 'Only completed jobs can be rated' });
+      if (request.rating_provider_to_customer !== null)
+        throw new ConflictException({ code: 'REQUEST_ALREADY_RATED', message: 'You already rated this customer' });
+      const updated = await tx.serviceRequest.update({ where: { id: requestId }, data: { providerRatingToCustomer: rating, providerReviewText: cleanReview || null } });
+      await tx.requestEvent.create({ data: { requestId, type: 'CUSTOMER_RATED', actorType: 'PROVIDER', actorId: providerId, payload: { rating } } });
+      return updated;
+    });
+  }
+
+  async updateJobStatus(providerId: string, requestId: string, to: RequestStatus, pickupPin?: string) {
     const request = await this.prisma.serviceRequest.findFirst({ where: { id: requestId, providerId } });
     if (!request) throw new ConflictException({ code: 'JOB_NOT_ASSIGNED', message: 'This job is not assigned to you' });
     if (!(new Set<RequestStatus>([RequestStatus.EN_ROUTE, RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS, RequestStatus.COMPLETED])).has(to)) throw new ConflictException({ code: 'INVALID_PROVIDER_STATUS', message: 'Provider cannot set this request status' });
+    if (to === RequestStatus.ARRIVED) {
+      if (!request.pickupPinHash || !pickupPin || !/^\d{4}$/.test(pickupPin) || !verifyPickupPin(pickupPin, request.pickupPinHash)) throw new ConflictException({ code: 'INVALID_PICKUP_PIN', message: 'Ask the customer for the correct 4-digit pickup PIN' });
+      await this.prisma.serviceRequest.update({ where: { id: requestId }, data: { pickupVerifiedAt: new Date() } });
+    }
     return this.states.transition(requestId, to, { type: 'PROVIDER', id: providerId });
   }
 
@@ -204,6 +275,12 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sweep() {
+    const dueScheduled = await this.prisma.serviceRequest.findMany({
+      where: { status: RequestStatus.REQUESTED, scheduledFor: { lte: new Date() } },
+      select: { id: true },
+      take: 100,
+    });
+    for (const request of dueScheduled) await this.start(request.id).catch(() => undefined);
     const expired = await this.prisma.dispatchOffer.findMany({ where: { status: OfferStatus.PENDING, expiresAt: { lt: new Date(Date.now() - 3000) } }, select: { id: true } });
     for (const offer of expired) await this.expireOffer(offer.id).catch(() => undefined);
     await this.prisma.$executeRaw`UPDATE provider_profiles pp SET availability='ONLINE', updated_at=now() WHERE availability='RESERVED' AND NOT EXISTS (SELECT 1 FROM dispatch_offers o WHERE o.provider_id=pp.user_id AND o.status='PENDING')`;
@@ -228,6 +305,7 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
   }
 
   eligibleProviders(requestId: string) {
+    const cashCommissionLimit = WalletService.commissionLimitKobo();
     return this.prisma.$queryRaw<Array<{ userId: string; fullName: string | null; phone: string; distanceM: number }>>`
       SELECT pp.user_id AS "userId", u.full_name AS "fullName", u.phone, ST_Distance(pl.location, sr.pickup_location)::float AS "distanceM"
       FROM service_requests sr
@@ -235,10 +313,13 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
       JOIN provider_profiles pp ON pp.user_id=ps.provider_id AND pp.onboarding_status='APPROVED' AND pp.availability='ONLINE' AND pp.current_request_id IS NULL
       JOIN provider_locations pl ON pl.provider_id=pp.user_id AND pl.received_at > now() - interval '90 seconds' AND pl.accuracy_m <= 200
       JOIN users u ON u.id=pp.user_id AND u.status='ACTIVE'
-      WHERE sr.id=${requestId}::uuid ORDER BY ST_Distance(pl.location, sr.pickup_location) LIMIT 50`;
+      WHERE sr.id=${requestId}::uuid
+        AND COALESCE((SELECT -SUM(le.amount_kobo) FROM ledger_entries le WHERE le.provider_id=pp.user_id AND (le.type='PLATFORM_COMMISSION' OR (le.type='ADJUSTMENT' AND le.description LIKE 'Cash commission settlement%'))), 0) < ${cashCommissionLimit}
+      ORDER BY ST_Distance(pl.location, sr.pickup_location) LIMIT 50`;
   }
 
   async manualAssign(requestId: string, providerId: string, adminId: string) {
+    const cashCommissionLimit = WalletService.commissionLimitKobo();
     const assigned = await this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{ status: RequestStatus; service_type: ServiceType; dispatch_round: number }>>`SELECT status, service_type, dispatch_round FROM service_requests WHERE id=${requestId}::uuid FOR UPDATE`;
       const request = rows[0];
@@ -246,7 +327,9 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
       const providers = await tx.$queryRaw<Array<{ user_id: string }>>`
         SELECT pp.user_id FROM provider_profiles pp JOIN provider_services ps ON ps.provider_id=pp.user_id
         JOIN users u ON u.id=pp.user_id WHERE pp.user_id=${providerId}::uuid AND pp.onboarding_status='APPROVED'
-        AND pp.availability='ONLINE' AND pp.current_request_id IS NULL AND ps.service_type=${request.service_type}::"ServiceType" AND ps.status='APPROVED' AND u.status='ACTIVE' FOR UPDATE OF pp`;
+        AND pp.availability='ONLINE' AND pp.current_request_id IS NULL AND ps.service_type=${request.service_type}::"ServiceType" AND ps.status='APPROVED' AND u.status='ACTIVE'
+        AND COALESCE((SELECT -SUM(le.amount_kobo) FROM ledger_entries le WHERE le.provider_id=pp.user_id AND (le.type='PLATFORM_COMMISSION' OR (le.type='ADJUSTMENT' AND le.description LIKE 'Cash commission settlement%'))), 0) < ${cashCommissionLimit}
+        FOR UPDATE OF pp`;
       if (!providers.length) throw new ConflictException({ code: 'PROVIDER_NOT_ELIGIBLE', message: 'Provider is no longer eligible or available' });
       await tx.dispatchOffer.updateMany({ where: { requestId, status: OfferStatus.PENDING }, data: { status: OfferStatus.CANCELLED, respondedAt: new Date() } });
       const offer = await tx.dispatchOffer.create({ data: { requestId, providerId, sequenceNo: 1, round: request.dispatch_round, status: OfferStatus.ACCEPTED, offeredAt: new Date(), expiresAt: new Date(), respondedAt: new Date() } });

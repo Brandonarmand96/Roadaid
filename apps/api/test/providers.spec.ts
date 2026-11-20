@@ -11,12 +11,14 @@ import {
   ServiceType,
   DocumentType,
 } from '@roadaid/shared';
+import { WalletService } from '../src/wallet/wallet.service';
 
 describe('ProvidersService & Availability Invariants (Phase 1)', () => {
   let service: ProvidersService;
   let prisma: any;
   let storage: any;
   let realtimeGateway: any;
+  let wallet: any;
 
   beforeEach(async () => {
     prisma = {
@@ -54,6 +56,7 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
     realtimeGateway = {
       emitProviderAvailability: jest.fn(),
     };
+    wallet = { commissionPolicy: jest.fn().mockResolvedValue({ dueKobo: 0n, limitKobo: 5_000_000n, remainingKobo: 5_000_000n, blocked: false }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -61,6 +64,7 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: 'STORAGE_SERVICE', useValue: storage },
         { provide: RealtimeGateway, useValue: realtimeGateway },
+        { provide: WalletService, useValue: wallet },
       ],
     }).compile();
 
@@ -148,6 +152,19 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
         'prov-1',
         ProviderAvailability.ONLINE,
       );
+    });
+
+    it('blocks an otherwise eligible provider who reached the cash commission limit', async () => {
+      prisma.providerProfile.findUnique.mockResolvedValue({
+        userId: 'prov-1',
+        onboardingStatus: OnboardingStatus.APPROVED,
+        services: [{ serviceType: ServiceType.FUEL, status: ApprovalStatus.APPROVED }],
+        location: { receivedAt: new Date() },
+        currentRequestId: null,
+      });
+      wallet.commissionPolicy.mockResolvedValue({ dueKobo: 5_000_000n, limitKobo: 5_000_000n, remainingKobo: 0n, blocked: true });
+      await expect(service.setAvailability('prov-1', ProviderAvailability.ONLINE)).rejects.toMatchObject({ response: expect.objectContaining({ code: 'CASH_COMMISSION_LIMIT_REACHED' }) });
+      expect(prisma.providerProfile.update).not.toHaveBeenCalled();
     });
   });
 
