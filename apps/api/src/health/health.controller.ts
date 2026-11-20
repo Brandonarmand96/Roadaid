@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Controller()
@@ -25,12 +25,11 @@ export class HealthController {
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      return {
-        status: 'degraded',
-        database: 'disconnected',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-      };
+      throw new ServiceUnavailableException({
+        code: 'SERVICE_NOT_READY',
+        message: 'RoadAid database is unavailable',
+        details: { database: 'disconnected' },
+      });
     }
   }
 }

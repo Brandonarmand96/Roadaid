@@ -157,13 +157,26 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
-  pendingOffers(providerId: string) { return this.prisma.dispatchOffer.findMany({ where: { providerId, status: OfferStatus.PENDING, expiresAt: { gt: new Date() } }, include: { request: true }, orderBy: { offeredAt: 'desc' } }); }
+  async pendingOffers(providerId: string) {
+    const [offers, serverClock] = await Promise.all([
+      this.prisma.dispatchOffer.findMany({ where: { providerId, status: OfferStatus.PENDING, expiresAt: { gt: new Date() } }, include: { request: true }, orderBy: { offeredAt: 'desc' } }),
+      this.prisma.$queryRaw<Array<{ now: Date }>>`SELECT now() AS now`,
+    ]);
+    const serverNow = (serverClock[0]?.now ?? new Date()).toISOString();
+    return offers.map((offer) => ({ ...offer, serverNow }));
+  }
 
-  currentJob(providerId: string) {
-    return this.prisma.serviceRequest.findFirst({
+  async currentJob(providerId: string) {
+    const job = await this.prisma.serviceRequest.findFirst({
       where: { providerId, status: { in: [RequestStatus.ASSIGNED, RequestStatus.EN_ROUTE, RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS] } },
       include: { customer: { select: { fullName: true, phone: true } }, events: { orderBy: { createdAt: 'asc' } } },
     });
+    if (!job) return null;
+    const points = await this.prisma.$queryRaw<Array<{ pickup_lat: number; pickup_lng: number }>>`
+      SELECT ST_Y(pickup_location::geometry)::float AS pickup_lat,
+             ST_X(pickup_location::geometry)::float AS pickup_lng
+      FROM service_requests WHERE id=${job.id}::uuid`;
+    return { ...job, pickupLat: points[0]?.pickup_lat, pickupLng: points[0]?.pickup_lng };
   }
 
   async updateJobStatus(providerId: string, requestId: string, to: RequestStatus) {

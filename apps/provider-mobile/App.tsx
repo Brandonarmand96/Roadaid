@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -13,6 +13,7 @@ import {
   Platform,
   Linking,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { fetch as expoFetch } from "expo/fetch";
 import { File } from "expo-file-system";
 import * as Location from "expo-location";
@@ -21,6 +22,8 @@ import * as SecureStore from "expo-secure-store";
 import * as TaskManager from "expo-task-manager";
 import { OnboardingStatus, Role, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
+import MapView, { Marker, Polyline } from "react-native-maps";
+import { Clock3, Crosshair, Navigation, Power, UserRound } from "lucide-react-native";
 import CustomerExperience from "./CustomerExperience";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_EAS_PROJECT_ID?: string } };
@@ -73,6 +76,8 @@ type AppMode = "CUSTOMER" | "PROVIDER";
 type Offer = {
   id: string;
   expiresAt: string;
+  serverNow?: string;
+  localDeadlineMs?: number;
   etaSecondsAtOffer?: number;
   request: {
     code: string;
@@ -88,8 +93,59 @@ type Job = {
   serviceType: string;
   status: string;
   pickupAddress: string;
+  pickupLat?: number;
+  pickupLng?: number;
   customer?: { fullName?: string; phone: string };
 };
+type MapPoint = { latitude: number; longitude: number };
+
+function normalizeJob(value: unknown): Job | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<Job> & { request?: Partial<Job> };
+  const source = candidate.request && typeof candidate.request === "object"
+    ? { ...candidate.request, id: candidate.request.id ?? candidate.id }
+    : candidate;
+  if (!source.id) return null;
+  return {
+    id: source.id,
+    code: source.code ?? "",
+    serviceType: source.serviceType ?? "",
+    status: source.status ?? "",
+    pickupAddress: source.pickupAddress ?? "",
+    pickupLat: source.pickupLat,
+    pickupLng: source.pickupLng,
+    customer: source.customer,
+  };
+}
+
+function normalizeOffers(values: Offer[]) {
+  const receivedAt = Date.now();
+  return values.map((offer) => {
+    const serverNow = offer.serverNow ? Date.parse(offer.serverNow) : receivedAt;
+    const remainingMs = Math.max(0, Date.parse(offer.expiresAt) - serverNow);
+    return { ...offer, localDeadlineMs: receivedAt + remainingMs };
+  });
+}
+
+function openNavigation(job: Job) {
+  if (!Number.isFinite(job.pickupLat) || !Number.isFinite(job.pickupLng)) return;
+  const coordinates = `${job.pickupLat},${job.pickupLng}`;
+  const url = Platform.OS === "ios"
+    ? `http://maps.apple.com/?daddr=${coordinates}`
+    : `google.navigation:q=${coordinates}`;
+  void Linking.openURL(url);
+}
+
+function onboardingMessage(profile?: Profile) {
+  if (profile?.rejectionReason) return profile.rejectionReason;
+  if (profile?.onboardingStatus === OnboardingStatus.APPROVED) {
+    return "Your provider account is approved. Complete the location check to go online and receive matching offers.";
+  }
+  if (profile?.onboardingStatus === OnboardingStatus.REJECTED) {
+    return "Your application needs changes before it can be approved. Review the requested updates below.";
+  }
+  return "RoadAid Operations is reviewing your application.";
+}
 
 let currentSession: Session | undefined;
 let refreshInFlight: Promise<Session> | undefined;
@@ -238,6 +294,8 @@ export default function App() {
   const [intent, setIntent] = useState<AccountIntent>("CUSTOMER");
   const [mode, setMode] = useState<AppMode>("CUSTOMER");
   const [newProviderEnrollment, setNewProviderEnrollment] = useState(false);
+  const [providerPoint, setProviderPoint] = useState<MapPoint>();
+  const [showProviderAccount, setShowProviderAccount] = useState(false);
   const [form, setForm] = useState({
     businessName: "",
     address: "",
@@ -271,11 +329,11 @@ export default function App() {
     const refresh = () =>
       Promise.all([
         request<Offer[]>("/provider/offers", {}, token),
-        request<Job | null>("/provider/jobs/current", {}, token),
+        request<unknown>("/provider/jobs/current", {}, token),
       ])
         .then(([nextOffers, nextJob]) => {
-          setOffers(nextOffers);
-          setJob(nextJob);
+          setOffers(normalizeOffers(nextOffers));
+          setJob(normalizeJob(nextJob));
         })
         .catch(() => undefined);
     void refresh();
@@ -300,6 +358,8 @@ export default function App() {
       const foreground = await Location.getForegroundPermissionsAsync();
       const background = await Location.getBackgroundPermissionsAsync();
       if (!foreground.granted || !background.granted) { setTrackingState("OFF"); return; }
+      const lastPosition = await Location.getLastKnownPositionAsync();
+      if (lastPosition) setProviderPoint({ latitude: lastPosition.coords.latitude, longitude: lastPosition.coords.longitude });
       const active = Boolean(job && ["ASSIGNED", "EN_ROUTE", "ARRIVED", "IN_PROGRESS"].includes(job.status));
       if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
       await Location.startLocationUpdatesAsync(LOCATION_TASK, {
@@ -318,7 +378,7 @@ export default function App() {
   useEffect(() => {
     if (!token || !role || !process.env.EXPO_PUBLIC_EAS_PROJECT_ID) return;
     const register = async () => {
-      if (Platform.OS === "android") await Notifications.setNotificationChannelAsync("offers", { name: "RoadAid offers", importance: Notifications.AndroidImportance.MAX, vibrationPattern: [0, 300, 150, 300], sound: "default" });
+      if (Platform.OS === "android") await Notifications.setNotificationChannelAsync("offers", { name: "RoadAid offers", importance: Notifications.AndroidImportance.MAX, vibrationPattern: [0, 300, 150, 300] });
       const permission = await Notifications.requestPermissionsAsync();
       if (!permission.granted) return;
       const push = await Notifications.getExpoPushTokenAsync({ projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID });
@@ -329,7 +389,7 @@ export default function App() {
   useEffect(() => {
     if (!token || profile?.onboardingStatus !== OnboardingStatus.APPROVED) return;
     const socket = io(API.replace(/\/v1$/, ""), { auth: { token }, transports: ["websocket", "polling"] });
-    const refresh = () => Promise.all([request<Offer[]>("/provider/offers", {}, token), request<Job | null>("/provider/jobs/current", {}, token)]).then(([nextOffers, nextJob]) => { setOffers(nextOffers); setJob(nextJob); }).catch(() => undefined);
+    const refresh = () => Promise.all([request<Offer[]>("/provider/offers", {}, token), request<unknown>("/provider/jobs/current", {}, token)]).then(([nextOffers, nextJob]) => { setOffers(normalizeOffers(nextOffers)); setJob(normalizeJob(nextJob)); }).catch(() => undefined);
     socket.on("offer.new", refresh);
     socket.on("offer.expired", refresh);
     socket.on("offer.cancelled", refresh);
@@ -528,9 +588,10 @@ export default function App() {
   }
   async function requestPayout() {
     if (!token) return;
-    const naira = Number(payoutNaira);
-    if (!Number.isInteger(naira) || naira <= 0) return setError("Enter a whole-naira payout amount greater than zero.");
-    await act(async () => { await request("/provider/payouts", { method: "POST", body: JSON.stringify({ amountKobo: String(naira * 100) }) }, token); setPayouts(await request<Payout[]>("/provider/payouts", {}, token)); setPayoutNaira(""); });
+    if (!/^\d+$/.test(payoutNaira)) return setError("Enter a whole-naira payout amount greater than zero.");
+    const amountKobo = BigInt(payoutNaira) * 100n;
+    if (amountKobo <= 0n) return setError("Enter a whole-naira payout amount greater than zero.");
+    await act(async () => { await request("/provider/payouts", { method: "POST", body: JSON.stringify({ amountKobo: amountKobo.toString() }) }, token); setPayouts(await request<Payout[]>("/provider/payouts", {}, token)); setPayoutNaira(""); });
   }
   async function respondToOffer(id: string, accept: boolean) {
     if (!token) return;
@@ -545,7 +606,7 @@ export default function App() {
         },
         token,
       );
-      setOffers(await request<Offer[]>("/provider/offers", {}, token));
+      setOffers(normalizeOffers(await request<Offer[]>("/provider/offers", {}, token)));
     });
   }
   async function progressJob(status: string) {
@@ -591,10 +652,32 @@ export default function App() {
     return <CustomerExperience accessToken={token} apiRequest={request} notice={error} onSignOut={() => void signOut()} onSessionExpired={() => void signOut()} onProviderMode={role === Role.PROVIDER ? () => { setError(""); setMode("PROVIDER"); void load(token); } : undefined} />;
   }
 
+  if (token && mode === "PROVIDER" && step === "status" && profile?.onboardingStatus === OnboardingStatus.APPROVED && !showProviderAccount) {
+    return (
+      <ProviderCommandCenter
+        point={providerPoint}
+        availability={profile.availability ?? "OFFLINE"}
+        trackingState={trackingState}
+        offers={offers}
+        job={job}
+        busy={busy}
+        error={error}
+        onGoOnline={() => void goOnline()}
+        onRespond={(id, accept) => void respondToOffer(id, accept)}
+        onProgress={(status) => void progressJob(status)}
+        onCancelJob={() => void cancelJob()}
+        onLocationSettings={() => void Linking.openSettings()}
+        onCustomerMode={() => setMode("CUSTOMER")}
+        onAccount={() => setShowProviderAccount(true)}
+      />
+    );
+  }
+
   const sequence: Step[] = ["profile", "services", "documents", "review"];
   const position = sequence.indexOf(step) + 1;
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaProvider>
+      <SafeAreaView style={s.safe} edges={["top", "right", "bottom", "left"]}>
       <StatusBar barStyle="light-content" />
       <View style={s.header}>
         <Image source={require("./assets/roadaid-mark.png")} style={s.logo} resizeMode="contain" accessibilityIgnoresInvertColors />
@@ -603,12 +686,16 @@ export default function App() {
           <Text style={s.tagline}>BUILT FOR CERTAINTY</Text>
         </View>
       </View>
-      <ScrollView
-        contentContainerStyle={s.page}
-        keyboardShouldPersistTaps="handled"
-      >
+      <KeyboardAvoidingView style={s.content} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+        <ScrollView
+          contentContainerStyle={s.page}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          contentInsetAdjustmentBehavior="automatic"
+        >
         {token && role === Role.PROVIDER ? (
-          <><Link label="Switch to Customer mode" onPress={() => setMode("CUSTOMER")} /><Link label="Sign out" onPress={() => void signOut()} /></>
+          <><Link label="Switch to Customer mode" onPress={() => setMode("CUSTOMER")} />{showProviderAccount ? <Link label="Back to job center" onPress={() => setShowProviderAccount(false)} /> : null}<Link label="Sign out" onPress={() => void signOut()} /></>
         ) : null}
         {position > 0 && (
           <View style={s.progress}>
@@ -844,10 +931,7 @@ export default function App() {
           >
             <Notice
               title={profile?.onboardingStatus ?? "SUBMITTED"}
-              body={
-                profile?.rejectionReason ??
-                "RoadAid Operations is reviewing your application."
-              }
+              body={onboardingMessage(profile)}
             />
             {profile?.onboardingStatus === OnboardingStatus.APPROVED && (
               <>
@@ -860,16 +944,16 @@ export default function App() {
                 {job ? (
                   <View style={s.notice}>
                     <Text style={s.noticeTitle}>
-                      {job.serviceType} · {job.code}
+                      {[job.serviceType, job.code].filter(Boolean).join(" · ") || "Active roadside job"}
                     </Text>
-                    <Text style={s.noticeBody}>{job.pickupAddress}</Text>
+                    <Text style={s.noticeBody}>{job.pickupAddress || "Pickup details are syncing. Refresh status if they do not appear."}</Text>
                     <Text style={s.noticeBody}>
                       Customer:{" "}
                       {job.customer?.fullName ??
                         job.customer?.phone ??
                         "RoadAid customer"}
                     </Text>
-                    <Summary label="Job status" value={job.status} />
+                    <Summary label="Job status" value={job.status || "SYNCING"} />
                     {job.status === "ASSIGNED" && (
                       <Button
                         label="Start driving"
@@ -982,9 +1066,91 @@ export default function App() {
             <Link label="Refresh status" onPress={() => token && load(token)} />
           </Screen>
         )}
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
+}
+
+function ProviderCommandCenter({ point, availability, trackingState, offers, job, busy, error, onGoOnline, onRespond, onProgress, onCancelJob, onLocationSettings, onCustomerMode, onAccount }: {
+  point?: MapPoint;
+  availability: string;
+  trackingState: "OFF" | "IDLE" | "ACTIVE";
+  offers: Offer[];
+  job: Job | null;
+  busy: boolean;
+  error: string;
+  onGoOnline: () => void;
+  onRespond: (id: string, accept: boolean) => void;
+  onProgress: (status: "EN_ROUTE" | "ARRIVED" | "IN_PROGRESS" | "COMPLETED") => void;
+  onCancelJob: () => void;
+  onLocationSettings: () => void;
+  onCustomerMode: () => void;
+  onAccount: () => void;
+}) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!offers.length) return;
+    const timer = setInterval(() => setTick((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [offers.length]);
+  const center = point ?? { latitude: 9.0765, longitude: 7.3986 };
+  const offer = offers[0];
+  const secondsLeft = offer ? Math.max(0, Math.ceil(((offer.localDeadlineMs ?? Date.now()) - Date.now()) / 1000)) : 0;
+  const nextAction = job?.status === "ASSIGNED" ? ["Start driving", "EN_ROUTE"] as const : job?.status === "EN_ROUTE" ? ["Mark arrived", "ARRIVED"] as const : job?.status === "ARRIVED" ? ["Start service", "IN_PROGRESS"] as const : job?.status === "IN_PROGRESS" ? ["Complete job", "COMPLETED"] as const : null;
+  const online = ["ONLINE", "RESERVED", "BUSY"].includes(availability);
+  const pickup = job && Number.isFinite(job.pickupLat) && Number.isFinite(job.pickupLng)
+    ? { latitude: job.pickupLat as number, longitude: job.pickupLng as number }
+    : undefined;
+  return (
+    <SafeAreaProvider>
+      <View style={s.providerMapShell}>
+        <StatusBar barStyle="dark-content" />
+        <MapView style={StyleSheet.absoluteFill} region={{ ...center, latitudeDelta: 0.05, longitudeDelta: 0.05 }} showsUserLocation showsMyLocationButton={false} toolbarEnabled={false}>
+          {point ? <Marker coordinate={point} title="Your live position" pinColor="#191D23" /> : null}
+          {pickup ? <Marker coordinate={pickup} title="Customer pickup" pinColor="#D38A1C" /> : null}
+          {point && pickup ? <Polyline coordinates={[point, pickup]} strokeColor="#D38A1C" strokeWidth={5} /> : null}
+        </MapView>
+        <SafeAreaView style={s.providerMapTop} edges={["top", "right", "left"]} pointerEvents="box-none">
+          <View style={s.providerTopBar}>
+            <View style={s.providerStatusBlock}><Text style={s.providerStatusLabel}>{job ? "ACTIVE JOB" : online ? "ONLINE" : "OFFLINE"}</Text><Text style={s.providerStatusTitle}>{job ? job.code || "RoadAid job" : online ? "Ready for offers" : "You are not receiving offers"}</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Provider account" onPress={onAccount} style={s.providerRoundAction}><UserRound color="#191D23" size={22} /></Pressable>
+          </View>
+        </SafeAreaView>
+        <SafeAreaView style={s.providerBottomSafe} edges={["bottom"]} pointerEvents="box-none">
+          <View style={s.providerSheet}>
+            <View style={s.providerSheetHandle} />
+            <ScrollView style={s.providerSheetScroller} contentContainerStyle={s.providerSheetContent} showsVerticalScrollIndicator={false}>
+            {error ? <Notice title="Action failed" body={error} warning /> : null}
+            {job ? <>
+              <View style={s.providerJobHeading}><View style={s.providerJobIcon}><Navigation color="#191D23" size={25} /></View><View style={s.providerJobCopy}><Text style={s.providerSheetTitle}>{job.serviceType || "Roadside assistance"}</Text><Text style={s.providerSheetIntro}>{job.pickupAddress || "Pickup details are syncing"}</Text></View></View>
+              <Summary label="Customer" value={job.customer?.fullName ?? job.customer?.phone ?? "RoadAid customer"} />
+              <Summary label="Status" value={(job.status || "SYNCING").replaceAll("_", " ")} />
+              {pickup ? <SecondaryButton label="Navigate to pickup" onPress={() => openNavigation(job)} /> : null}
+              {nextAction ? <Button label={nextAction[0]} onPress={() => onProgress(nextAction[1])} busy={busy} /> : null}
+              <Link label="Cancel and return job to search" onPress={onCancelJob} />
+            </> : offer ? <>
+              <View style={s.offerHeading}><View><Text style={s.providerSheetTitle}>{offer.request.serviceType} request</Text><Text style={s.providerSheetIntro}>{offer.request.pickupAddress}</Text></View><View style={s.offerTimer}><Clock3 color="#191D23" size={18} /><Text style={s.offerTimerText}>{secondsLeft}s</Text></View></View>
+              <Summary label="Estimated arrival" value={offer.etaSecondsAtOffer ? `${Math.max(1, Math.ceil(offer.etaSecondsAtOffer / 60))} min` : "Calculating"} />
+              <View style={s.offerActions}><View style={s.providerFlex}><SecondaryButton label="Decline" onPress={() => onRespond(offer.id, false)} disabled={busy} /></View><View style={s.providerFlex}><Button label="Accept job" onPress={() => onRespond(offer.id, true)} busy={busy} /></View></View>
+            </> : <>
+              <View style={s.providerIdleIcon}><Power color={online ? "#218A52" : "#83520F"} size={28} /></View>
+              <Text style={s.providerSheetTitle}>{online ? "You’re ready for roadside jobs" : "Go online when you’re ready"}</Text>
+              <Text style={s.providerSheetIntro}>{online ? "RoadAid is matching nearby requests to your approved services." : "Share your location to receive one timed offer at a time."}</Text>
+              {trackingState === "OFF" && online ? <SecondaryButton label="Fix background location" onPress={onLocationSettings} /> : !online ? <Button label="Share location and go online" onPress={onGoOnline} busy={busy} /> : null}
+            </>}
+            <View style={s.providerSheetNav}><Pressable accessibilityRole="button" accessibilityLabel="Switch to Customer mode" onPress={onCustomerMode} style={s.providerNavAction}><Crosshair color="#191D23" size={20} /><Text style={s.providerNavText}>Customer mode</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Open account and earnings" onPress={onAccount} style={s.providerNavAction}><UserRound color="#191D23" size={20} /><Text style={s.providerNavText}>Account & earnings</Text></Pressable></View>
+            </ScrollView>
+          </View>
+        </SafeAreaView>
+      </View>
+    </SafeAreaProvider>
+  );
+}
+
+function SecondaryButton({ label, onPress, disabled }: { label: string; onPress: () => void; disabled?: boolean }) {
+  return <Pressable accessibilityRole="button" onPress={onPress} disabled={disabled} style={[s.secondaryButton, disabled && s.disabled]}><Text style={s.secondaryButtonText}>{label}</Text></Pressable>;
 }
 
 const money = (kobo: number) => new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 0 }).format(Math.trunc(kobo / 100));
@@ -1120,7 +1286,37 @@ function Notice({
 }
 
 const s = StyleSheet.create({
+  providerMapShell: { flex: 1, backgroundColor: "#E9ECE8" },
+  providerMapTop: { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 16 },
+  providerTopBar: { minHeight: 66, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  providerStatusBlock: { flex: 1, minHeight: 54, justifyContent: "center", paddingHorizontal: 15, backgroundColor: "#191D23", borderRadius: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.18, shadowRadius: 12, elevation: 6 },
+  providerStatusLabel: { color: "#F4AE3E", fontSize: 10, fontWeight: "900", letterSpacing: 1 },
+  providerStatusTitle: { color: "#FFFFFF", fontSize: 15, fontWeight: "900", marginTop: 2 },
+  providerRoundAction: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.16, shadowRadius: 10, elevation: 5 },
+  providerBottomSafe: { position: "absolute", left: 0, right: 0, bottom: 0 },
+  providerSheet: { maxHeight: "72%", backgroundColor: "#F9FAF8", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 12, shadowColor: "#000", shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.14, shadowRadius: 18, elevation: 16 },
+  providerSheetScroller: { flexGrow: 0 },
+  providerSheetContent: { paddingBottom: 4 },
+  providerSheetHandle: { width: 42, height: 5, borderRadius: 3, backgroundColor: "#C8CCC6", alignSelf: "center", marginBottom: 15 },
+  providerSheetTitle: { color: "#191D23", fontSize: 24, lineHeight: 29, fontWeight: "900", letterSpacing: -0.45 },
+  providerSheetIntro: { color: "#59636F", fontSize: 14, lineHeight: 20, marginTop: 5 },
+  providerIdleIcon: { width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0CC", marginBottom: 12 },
+  providerJobHeading: { flexDirection: "row", alignItems: "center", gap: 13, marginBottom: 6 },
+  providerJobIcon: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#F4AE3E" },
+  providerJobCopy: { flex: 1, minWidth: 0 },
+  offerHeading: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 6 },
+  offerEyebrow: { color: "#83520F", fontSize: 10, fontWeight: "900", letterSpacing: 0.8, marginBottom: 5 },
+  offerTimer: { minWidth: 62, minHeight: 46, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: 14, backgroundColor: "#FFF0CC" },
+  offerTimerText: { color: "#191D23", fontSize: 16, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  offerActions: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 9 },
+  providerFlex: { flex: 1 },
+  secondaryButton: { minHeight: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#E8EBE6", marginTop: 4 },
+  secondaryButtonText: { color: "#191D23", fontSize: 15, fontWeight: "900" },
+  providerSheetNav: { flexDirection: "row", gap: 10, marginTop: 14 },
+  providerNavAction: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, borderRadius: 14, backgroundColor: "#ECEFEA" },
+  providerNavText: { color: "#191D23", fontSize: 12, fontWeight: "800" },
   safe: { flex: 1, backgroundColor: "#191D23" },
+  content: { flex: 1 },
   header: {
     height: 80,
     paddingHorizontal: 20,
@@ -1141,7 +1337,7 @@ const s = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 1.4,
   },
-  page: { flexGrow: 1, backgroundColor: "#F6F7F5", padding: 20 },
+  page: { flexGrow: 1, backgroundColor: "#F6F7F5", paddingHorizontal: 20, paddingTop: 20, paddingBottom: 56 },
   screen: {
     flex: 1,
     justifyContent: "center",

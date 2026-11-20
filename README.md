@@ -9,7 +9,7 @@ Serving **Fuel Delivery**, **Towing**, and **Lockout Assistance**.
 
 - **Monorepo:** pnpm workspaces + Turborepo
 - **Backend:** NestJS (Express adapter), PostgreSQL 16 + PostGIS, Redis 7 + BullMQ, Socket.IO
-- **Mobile Apps:** React Native + Expo (EAS Build / Dev Client) for Customer and Provider
+- **Mobile:** One React Native + Expo app with Customer and Provider modes
 - **Admin Dashboard:** Next.js 14 (App Router) + Tailwind CSS
 
 ---
@@ -50,16 +50,28 @@ pnpm --filter api db:migrate
 pnpm --filter api db:seed
 ```
 
-### 5. Run All Applications
+### 5. Run API and Admin
 ```bash
-pnpm dev
+pnpm --filter api dev
+pnpm --filter admin-web dev
 ```
 - **API:** http://localhost:3000
 - **Swagger Docs:** http://localhost:3000/docs
-- **Health Check:** http://localhost:3000/v1/health
+- **Health Check:** http://localhost:3000/health
+- **Readiness Check:** http://localhost:3000/ready
 - **Admin Dashboard:** http://localhost:3001
-- **Customer Mobile:** Expo dev server
-- **Provider Mobile:** Expo dev server
+
+### 6. Run the Unified Mobile App
+
+Use a LAN-reachable API address; `localhost` on a phone points to the phone itself.
+
+```powershell
+$env:EXPO_PUBLIC_API_URL="http://YOUR_LAN_IP:3000/v1"
+$env:EXPO_PUBLIC_EAS_PROJECT_ID="YOUR_EAS_PROJECT_ID"
+pnpm --filter mobile start -- --dev-client --lan
+```
+
+Install the EAS development APK before connecting to Metro. Expo Go is not valid evidence for background location or background push.
 
 ---
 
@@ -71,6 +83,9 @@ pnpm test
 
 # Run type checks across all workspaces
 pnpm typecheck
+
+# Run the exact-kobo three-service journey
+pnpm e2e:journey
 ```
 
 ---

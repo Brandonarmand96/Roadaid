@@ -27,4 +27,31 @@ describe('Environment Config Validation', () => {
 
     expect(() => validateEnv(invalidConfig)).toThrow(/JWT_ACCESS_SECRET/);
   });
+
+  it('rejects development shortcuts in production', () => {
+    expect(() => validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://roadaid:roadaid@localhost:5432/roadaid?schema=public',
+      JWT_ACCESS_SECRET: 'development_jwt_access_secret_key_minimum_32_characters_long_for_security',
+      JWT_REFRESH_SECRET: 'development_jwt_refresh_secret_key_minimum_32_characters_long_for_security',
+      OTP_DEV_FIXED_CODE: '123456',
+      SMS_PROVIDER: 'console',
+      ADMIN_BOOTSTRAP_PASSWORD: 'AdminSecurePassword2026!',
+    })).toThrow(/CORS_ORIGINS|OTP_DEV_FIXED_CODE|SMS_PROVIDER|Development JWT secrets|default bootstrap password/);
+  });
+
+  it('accepts a fail-closed production configuration', () => {
+    expect(() => validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://roadaid:strong-password@db.internal:5432/roadaid?schema=public',
+      JWT_ACCESS_SECRET: 'production-access-secret-with-at-least-thirty-two-characters',
+      JWT_REFRESH_SECRET: 'production-refresh-secret-with-at-least-thirty-two-characters',
+      CORS_ORIGINS: 'https://admin.roadaid.co',
+      SMS_PROVIDER: 'termii',
+      TERMII_API_KEY: 'termii-test-value',
+      PAYSTACK_SECRET_KEY: 'sk_live_test-value',
+      PAYSTACK_WEBHOOK_SECRET: 'sk_live_test-value',
+      ADMIN_BOOTSTRAP_PASSWORD: 'a-unique-production-bootstrap-password',
+    })).not.toThrow();
+  });
 });

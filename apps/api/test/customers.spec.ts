@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import { CustomersService } from '../src/customers/customers.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { VehicleType } from '@roadaid/shared';
 
 describe('CustomersService & IDOR Protection (Phase 1)', () => {
   let service: CustomersService;

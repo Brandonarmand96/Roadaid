@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  KeyboardAvoidingView,
   Linking,
+  Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -12,11 +14,12 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { FuelType, LockType, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
 import MapView, { Marker, Polyline } from "react-native-maps";
-import { Bike, Phone, Truck, Wrench } from "lucide-react-native";
+import { Bike, Crosshair, History, LogOut, Phone, Truck, Wrench } from "lucide-react-native";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
 const rawApi = (
@@ -58,6 +61,13 @@ type ProviderPosition = {
   heading?: number;
   receivedAt: string;
 };
+
+function confirmSignOut(onSignOut: () => void) {
+  Alert.alert("Sign out of RoadAid?", "You’ll need a new secure code to sign in again.", [
+    { text: "Cancel", style: "cancel" },
+    { text: "Sign out", style: "destructive", onPress: onSignOut },
+  ]);
+}
 
 export default function CustomerExperience({
   accessToken,
@@ -108,16 +118,17 @@ export default function CustomerExperience({
   );
   const [, setClock] = useState(0);
   useEffect(() => {
-    if (!token || screen !== "history") return;
+    if (!token) return;
     const refresh = () =>
       request<RoadRequest[]>("/requests", {}, token)
         .then(setHistory)
         .catch(() => undefined);
+    void refresh();
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
-  }, [token, screen]);
+  }, [token]);
   useEffect(() => {
-    if (!token || screen !== "history") return;
+    if (!token) return;
     const socket = io(API.replace(/\/v1$/, ""), {
       auth: { token },
       transports: ["websocket", "polling"],
@@ -152,12 +163,11 @@ export default function CustomerExperience({
     return () => {
       socket.disconnect();
     };
-  }, [token, screen]);
+  }, [token]);
   useEffect(() => {
-    if (screen !== "history") return;
     const timer = setInterval(() => setClock((value) => value + 1), 15000);
     return () => clearInterval(timer);
-  }, [screen]);
+  }, []);
   async function act(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -244,7 +254,8 @@ export default function CustomerExperience({
         },
         token,
       );
-      await loadHistory();
+      setHistory(await request<RoadRequest[]>("/requests", {}, token));
+      setScreen("home");
     });
   }
   async function cancel(id: string) {
@@ -299,13 +310,58 @@ export default function CustomerExperience({
       setFeedback("");
     });
   }
+  const activeRequest = history.find((item) =>
+    ["REQUESTED", "SEARCHING", "ASSIGNED", "EN_ROUTE", "ARRIVED", "IN_PROGRESS", "ESCALATED"].includes(item.status),
+  );
+  if (screen === "home" && activeRequest) {
+    const position = positions[activeRequest.id];
+    const ageSeconds = position
+      ? Math.max(0, Math.floor((Date.now() - Date.parse(position.receivedAt)) / 1000))
+      : null;
+    const paymentDue = activeRequest.paymentStatus !== "PAID" &&
+      activeRequest.paymentMode === "ONLINE_AFTER_ACCEPT" &&
+      ["ASSIGNED", "EN_ROUTE", "ARRIVED"].includes(activeRequest.status);
+    return (
+      <CustomerActiveMap
+        request={activeRequest}
+        position={position}
+        ageSeconds={ageSeconds}
+        busy={busy}
+        error={error}
+        paymentDue={paymentDue}
+        onPay={() => void pay(activeRequest.id)}
+        onCancel={() => void cancel(activeRequest.id)}
+        onHistory={() => setScreen("history")}
+        onSignOut={onSignOut}
+        onProviderMode={onProviderMode}
+      />
+    );
+  }
+  if (screen === "home") {
+    return (
+      <CustomerHomeMap
+        pickup={pickup}
+        busy={busy}
+        error={error}
+        onLocate={() => void locate()}
+        onService={(next) => { setService(next); setScreen("details"); }}
+        onHistory={() => void loadHistory()}
+        onSignOut={onSignOut}
+        onProviderMode={onProviderMode}
+      />
+    );
+  }
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaProvider>
+      <SafeAreaView style={s.safe} edges={["top", "right", "bottom", "left"]}>
       <StatusBar barStyle="light-content" />
       <Header onPress={token ? () => setScreen("home") : undefined} />
+      <KeyboardAvoidingView style={s.keyboardArea} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScrollView
         contentContainerStyle={s.page}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
       >
         {onProviderMode ? (
           <Link label="Switch to Provider mode" onPress={onProviderMode} />
@@ -314,44 +370,6 @@ export default function CustomerExperience({
         {error ? (
           <Notice title="We could not continue" body={error} warning />
         ) : null}
-        {screen === "home" && (
-          <Section
-            title="What happened?"
-            intro="Choose the assistance you need. You will review the exact price before sending the request."
-          >
-            <Service
-              serviceType={ServiceType.FUEL}
-              label="Emergency fuel"
-              detail="Delivered by a verified dispatch rider"
-              onPress={() => {
-                setService(ServiceType.FUEL);
-                setScreen("details");
-              }}
-            />
-            <Service
-              serviceType={ServiceType.TOWING}
-              label="Vehicle towing"
-              detail="A verified tow operator comes to you"
-              onPress={() => {
-                setService(ServiceType.TOWING);
-                setScreen("details");
-              }}
-            />
-            <Service
-              serviceType={ServiceType.LOCKOUT}
-              label="Vehicle lockout"
-              detail="A roadside technician helps you regain access"
-              onPress={() => {
-                setService(ServiceType.LOCKOUT);
-                setScreen("details");
-              }}
-            />
-            <Link
-              label="View request history"
-              onPress={() => void loadHistory()}
-            />
-          </Section>
-        )}
         {screen === "details" && service && (
           <Section
             title={
@@ -597,7 +615,116 @@ export default function CustomerExperience({
           </Section>
         )}
       </ScrollView>
-    </SafeAreaView>
+      </KeyboardAvoidingView>
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}
+
+function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, onSignOut, onProviderMode }: {
+  pickup: { lat: number; lng: number; address: string };
+  busy: boolean;
+  error: string;
+  onLocate: () => void;
+  onService: (service: ServiceType) => void;
+  onHistory: () => void;
+  onSignOut: () => void;
+  onProviderMode?: () => void;
+}) {
+  return (
+    <SafeAreaProvider>
+      <View style={s.mapShell}>
+        <StatusBar barStyle="dark-content" />
+        <MapView
+          style={StyleSheet.absoluteFill}
+          region={{ latitude: pickup.lat, longitude: pickup.lng, latitudeDelta: 0.045, longitudeDelta: 0.045 }}
+          showsUserLocation
+          showsMyLocationButton={false}
+          toolbarEnabled={false}
+        >
+          <Marker coordinate={{ latitude: pickup.lat, longitude: pickup.lng }} title="Your pickup" pinColor="#D38A1C" />
+        </MapView>
+        <SafeAreaView style={s.mapChrome} edges={["top", "right", "left"]} pointerEvents="box-none">
+          <View style={s.floatingBar}>
+            <View style={s.compactBrand}>
+              <Image source={require("./assets/roadaid-mark.png")} style={s.compactLogo} resizeMode="contain" />
+              <View><Text style={s.compactBrandName}>RoadAid</Text><Text style={s.compactTagline}>BUILT FOR CERTAINTY</Text></View>
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => confirmSignOut(onSignOut)} style={s.roundAction}>
+              <LogOut color="#191D23" size={22} />
+            </Pressable>
+          </View>
+        </SafeAreaView>
+        <Pressable accessibilityRole="button" accessibilityLabel="Use my current location" onPress={onLocate} disabled={busy} style={s.locateFab}>
+          {busy ? <ActivityIndicator color="#191D23" /> : <Crosshair color="#191D23" size={23} />}
+        </Pressable>
+        <SafeAreaView style={s.bottomSafe} edges={["bottom"]} pointerEvents="box-none">
+          <View style={s.rideSheet}>
+            <View style={s.sheetHandle} />
+            <ScrollView style={s.sheetScroller} contentContainerStyle={s.sheetScrollContent} showsVerticalScrollIndicator={false}>
+            <Text style={s.sheetTitle}>Where do you need help?</Text>
+            <Text style={s.sheetIntro}>Choose a roadside service. You’ll see the exact price before confirming.</Text>
+            {error ? <Notice title="We could not continue" body={error} warning /> : null}
+            <View style={s.serviceGrid}>
+              <QuickService service={ServiceType.FUEL} label="Fuel" icon={<Bike color="#191D23" size={25} />} onPress={onService} />
+              <QuickService service={ServiceType.TOWING} label="Towing" icon={<Truck color="#191D23" size={25} />} onPress={onService} />
+              <QuickService service={ServiceType.LOCKOUT} label="Lockout" icon={<Wrench color="#191D23" size={25} />} onPress={onService} />
+            </View>
+            <View style={s.sheetActions}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Open request activity" onPress={onHistory} style={s.secondaryAction}><History color="#191D23" size={20} /><Text style={s.secondaryActionText}>Activity</Text></Pressable>
+              {onProviderMode ? <Pressable accessibilityRole="button" accessibilityLabel="Switch to Provider mode" onPress={onProviderMode} style={s.secondaryAction}><Truck color="#191D23" size={20} /><Text style={s.secondaryActionText}>Provider mode</Text></Pressable> : null}
+            </View>
+            </ScrollView>
+          </View>
+        </SafeAreaView>
+      </View>
+    </SafeAreaProvider>
+  );
+}
+
+function QuickService({ service, label, icon, onPress }: { service: ServiceType; label: string; icon: React.ReactNode; onPress: (service: ServiceType) => void }) {
+  return <Pressable accessibilityRole="button" onPress={() => onPress(service)} style={s.quickService}><View style={s.quickServiceIcon}>{icon}</View><Text style={s.quickServiceLabel}>{label}</Text></Pressable>;
+}
+
+function CustomerActiveMap({ request, position, ageSeconds, busy, error, paymentDue, onPay, onCancel, onHistory, onSignOut, onProviderMode }: {
+  request: RoadRequest; position?: ProviderPosition; ageSeconds: number | null; busy: boolean; error: string; paymentDue: boolean;
+  onPay: () => void; onCancel: () => void; onHistory: () => void; onSignOut: () => void; onProviderMode?: () => void;
+}) {
+  const presentation = servicePresentation(request.serviceType);
+  const pickup = { latitude: request.pickupLat || 9.0765, longitude: request.pickupLng || 7.3986 };
+  const provider = position ? { latitude: position.lat, longitude: position.lng } : undefined;
+  const center = provider ?? pickup;
+  const stale = ageSeconds !== null && ageSeconds > 30;
+  const disconnected = ageSeconds !== null && ageSeconds > 120;
+  const headline = request.status === "ARRIVED" ? "Your responder has arrived" : request.status === "IN_PROGRESS" ? "Service in progress" : ["ASSIGNED", "EN_ROUTE"].includes(request.status) ? "Your responder is on the way" : request.status === "ESCALATED" ? "Operations is finding another responder" : "Finding the best responder";
+  return (
+    <SafeAreaProvider>
+      <View style={s.mapShell}>
+        <StatusBar barStyle="dark-content" />
+        <MapView style={StyleSheet.absoluteFill} region={{ ...center, latitudeDelta: 0.04, longitudeDelta: 0.04 }} showsCompass={false} toolbarEnabled={false}>
+          <Marker coordinate={pickup} title="Pickup" pinColor="#D38A1C" />
+          {provider ? <Marker coordinate={provider} title={presentation.role} pinColor="#191D23" /> : null}
+          {provider ? <Polyline coordinates={[provider, pickup]} strokeColor="#D38A1C" strokeWidth={5} /> : null}
+        </MapView>
+        <SafeAreaView style={s.mapChrome} edges={["top", "right", "left"]} pointerEvents="box-none">
+          <View style={s.floatingBar}><View style={s.tripCode}><Text style={s.tripCodeLabel}>{request.serviceType}</Text><Text style={s.tripCodeValue}>{request.code}</Text></View><Pressable accessibilityRole="button" onPress={onHistory} style={s.roundAction}><History color="#191D23" size={22} /></Pressable></View>
+        </SafeAreaView>
+        <SafeAreaView style={s.bottomSafe} edges={["bottom"]} pointerEvents="box-none">
+          <View style={s.rideSheet}>
+            <View style={s.sheetHandle} />
+            <ScrollView style={s.sheetScroller} contentContainerStyle={s.sheetScrollContent} showsVerticalScrollIndicator={false}>
+            <View style={s.activeHeading}><View style={s.activeCopy}><Text style={s.sheetTitle}>{headline}</Text><Text style={s.sheetIntro}>{request.etaSeconds ? `${Math.max(1, Math.ceil(request.etaSeconds / 60))} min estimated arrival` : request.pickupAddress}</Text></View><View style={s.quickServiceIcon}>{presentation.icon}</View></View>
+            <View style={[s.liveStrip, (stale || disconnected) && s.liveStripWarning]}><View style={[s.liveDot, (stale || disconnected) && s.liveDotWarning]} /><Text style={s.liveText}>{disconnected ? "Location connection lost" : stale ? "Location update delayed" : provider ? "Responder location is live" : "Waiting for responder location"}</Text></View>
+            {request.provider ? <View style={s.responderCompact}><View><Text style={s.responderName}>{request.provider.fullName ?? "Verified RoadAid responder"}</Text><Text style={s.responderRole}>{presentation.role}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Call responder" onPress={() => void Linking.openURL(`tel:${request.provider?.phone}`)} style={s.callButton}><Phone color="#191D23" size={21} /></Pressable></View> : null}
+            {error ? <Notice title="Update failed" body={error} warning /> : null}
+            {paymentDue ? <Button label={`Pay ${money(request.priceKobo)}`} onPress={onPay} busy={busy} /> : null}
+            {["REQUESTED", "SEARCHING", "ESCALATED", "ASSIGNED", "EN_ROUTE"].includes(request.status) ? <Link label="Cancel request" onPress={onCancel} /> : null}
+            <View style={s.sheetActions}>{onProviderMode ? <Pressable accessibilityRole="button" accessibilityLabel="Switch to Provider mode" onPress={onProviderMode} style={s.secondaryAction}><Truck color="#191D23" size={20} /><Text style={s.secondaryActionText}>Provider mode</Text></Pressable> : null}<Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => confirmSignOut(onSignOut)} style={s.secondaryAction}><LogOut color="#191D23" size={20} /><Text style={s.secondaryActionText}>Sign out</Text></Pressable></View>
+            </ScrollView>
+          </View>
+        </SafeAreaView>
+      </View>
+    </SafeAreaProvider>
   );
 }
 const REQUEST_STEPS = [
@@ -832,32 +959,6 @@ function Link({ label, onPress }: { label: string; onPress: () => void }) {
     </Pressable>
   );
 }
-function Service({
-  serviceType,
-  label,
-  detail,
-  onPress,
-}: {
-  serviceType: ServiceType;
-  label: string;
-  detail: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={s.service}>
-      <View style={s.serviceContent}>
-        <View style={s.serviceListIcon}>
-          {servicePresentation(serviceType).icon}
-        </View>
-        <View style={s.serviceText}>
-          <Text style={s.serviceTitle}>{label}</Text>
-          <Text style={s.muted}>{detail}</Text>
-        </View>
-      </View>
-      <Text style={s.arrow}>›</Text>
-    </Pressable>
-  );
-}
 function Choices({
   values,
   value,
@@ -908,6 +1009,41 @@ function Notice({
   );
 }
 const s = StyleSheet.create({
+  mapShell: { flex: 1, backgroundColor: "#E9ECE8" },
+  mapChrome: { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 16 },
+  floatingBar: { minHeight: 60, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  compactBrand: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: "#191D23", borderRadius: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.18, shadowRadius: 12, elevation: 6 },
+  compactLogo: { width: 36, height: 36 },
+  compactBrandName: { color: "#FFFFFF", fontSize: 16, lineHeight: 18, fontWeight: "900" },
+  compactTagline: { color: "#F4AE3E", fontSize: 7, lineHeight: 10, fontWeight: "900", letterSpacing: 1.1 },
+  roundAction: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.16, shadowRadius: 10, elevation: 5 },
+  locateFab: { position: "absolute", right: 18, bottom: 330, width: 52, height: 52, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.17, shadowRadius: 10, elevation: 5 },
+  bottomSafe: { position: "absolute", left: 0, right: 0, bottom: 0 },
+  rideSheet: { maxHeight: "72%", backgroundColor: "#F9FAF8", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 12, shadowColor: "#000", shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.14, shadowRadius: 18, elevation: 16 },
+  keyboardArea: { flex: 1 },
+  sheetScroller: { flexGrow: 0 },
+  sheetScrollContent: { paddingBottom: 4 },
+  sheetHandle: { width: 42, height: 5, borderRadius: 3, backgroundColor: "#C8CCC6", alignSelf: "center", marginBottom: 15 },
+  sheetTitle: { color: "#191D23", fontSize: 25, lineHeight: 30, fontWeight: "900", letterSpacing: -0.5 },
+  sheetIntro: { color: "#59636F", fontSize: 14, lineHeight: 20, marginTop: 5 },
+  serviceGrid: { flexDirection: "row", gap: 10, marginTop: 18 },
+  quickService: { flex: 1, minHeight: 86, borderRadius: 16, alignItems: "center", justifyContent: "center", gap: 7, backgroundColor: "#FFF0CC" },
+  quickServiceIcon: { width: 46, height: 46, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#F4AE3E" },
+  quickServiceLabel: { color: "#191D23", fontSize: 13, fontWeight: "900" },
+  sheetActions: { flexDirection: "row", gap: 10, marginTop: 14 },
+  secondaryAction: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 14, backgroundColor: "#ECEFEA" },
+  secondaryActionText: { color: "#191D23", fontSize: 13, fontWeight: "800" },
+  tripCode: { minHeight: 52, justifyContent: "center", paddingHorizontal: 15, backgroundColor: "#191D23", borderRadius: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.18, shadowRadius: 12, elevation: 6 },
+  tripCodeLabel: { color: "#F4AE3E", fontSize: 10, fontWeight: "900", letterSpacing: 0.8 },
+  tripCodeValue: { color: "#FFFFFF", fontSize: 15, fontWeight: "900", marginTop: 2 },
+  activeHeading: { flexDirection: "row", alignItems: "center", gap: 14 },
+  activeCopy: { flex: 1, minWidth: 0 },
+  liveStrip: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 12, borderRadius: 12, backgroundColor: "#E3F1E8", marginTop: 15 },
+  liveStripWarning: { backgroundColor: "#FFF0CC" },
+  liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: "#218A52" },
+  liveDotWarning: { backgroundColor: "#C97821" },
+  liveText: { color: "#263247", fontSize: 13, fontWeight: "800" },
+  responderCompact: { minHeight: 62, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 9 },
   safe: { flex: 1, backgroundColor: "#191D23" },
   header: {
     height: 80,

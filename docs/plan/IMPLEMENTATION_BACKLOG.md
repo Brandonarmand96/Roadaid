@@ -46,7 +46,7 @@ Tracking implementation phases against SPEC.md and Implementation Blueprint.
 - **TASK-406**: Ratings, customer disputes, and cancellation fee policies.
 
 ## Epic 5: Hardening, Security & Handover (Phase 5) — Target: 29–30 Nov
-- **TASK-501**: Comprehensive end-to-end journey tests (`pnpm e2e:journey`).
-- **TASK-502**: Mobile location permission wizards, background handling, and offline sync.
-- **TASK-503**: Security review (IDOR, rate limits, PII sanitization, secret scanning).
-- **TASK-504**: Documentation suite (`README.md`, `API.md`, `RUNBOOK.md`, `ADMIN_GUIDE.md`, `HANDOVER.md`).
+- [x] **TASK-501**: Comprehensive end-to-end journey tests (`pnpm e2e:journey`).
+- [x] **TASK-502**: Mobile location permission wizards, background handling, and offline sync.
+- [x] **TASK-503**: Security review (IDOR, rate limits, PII sanitization, secret scanning).
+- [x] **TASK-504**: Documentation suite (`README.md`, `API.md`, `RUNBOOK.md`, `ADMIN_GUIDE.md`, `HANDOVER.md`).

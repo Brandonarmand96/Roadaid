@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { HealthController } from '../src/health/health.controller';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -36,10 +37,8 @@ describe('HealthController', () => {
     expect(result.database).toBe('connected');
   });
 
-  it('returns degraded when database query fails', async () => {
+  it('returns HTTP 503 semantics when database query fails', async () => {
     jest.spyOn(prismaService, '$queryRaw').mockRejectedValueOnce(new Error('DB Conn Error'));
-    const result = await controller.getReady();
-    expect(result.status).toBe('degraded');
-    expect(result.database).toBe('disconnected');
+    await expect(controller.getReady()).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });

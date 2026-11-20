@@ -13,6 +13,7 @@ describe('DispatchService offer responses', () => {
   };
   const prisma: any = {
     $transaction: jest.fn((callback) => callback(tx)),
+    $queryRaw: jest.fn(),
     dispatchOffer: { findMany: jest.fn() },
   };
   const realtime: any = { emitRequestUpdated: jest.fn(), emitOfferExpired: jest.fn() };
@@ -26,6 +27,7 @@ describe('DispatchService offer responses', () => {
 
   it('scopes pending offers to the authenticated provider', async () => {
     prisma.dispatchOffer.findMany.mockResolvedValue([]);
+    prisma.$queryRaw.mockResolvedValue([{ now: new Date('2026-11-20T12:00:00.000Z') }]);
     await service.pendingOffers('provider-1');
     expect(prisma.dispatchOffer.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ providerId: 'provider-1', status: OfferStatus.PENDING }) }));
   });

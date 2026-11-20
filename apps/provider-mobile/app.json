@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "RoadAid",
-    "slug": "roadaid",
+    "slug": "roadaid-provider",
     "version": "1.0.0",
     "icon": "./assets/roadaid-mark.png",
     "orientation": "portrait",
@@ -19,6 +19,7 @@
       }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/roadaid-mark.png",
         "backgroundColor": "#191D23"

@@ -521,3 +521,51 @@ Phase 3 dispatch is now authorized.
 - API typecheck and regression suite: PASS (72/72).
 - Live FUEL, TOWING and LOCKOUT paid journeys: PASS with exact integer-kobo reconciliation and 18 realtime updates.
 - Physical visual QA remains part of the Phase 4 unified-device gate.
+
+---
+
+## Phase 5: Freeze and Hardening
+
+**Status:** Implementation complete; physical release evidence remains pending
+**Started:** 20 Nov 2026
+
+### Slice 1 — Production security and release safety
+
+- Production environment validation now fails closed when `CORS_ORIGINS` is absent, a fixed development OTP is configured, console SMS is selected, Termii or Paystack credentials are absent, development JWT secrets are reused, or the default bootstrap password remains active.
+- Production browser CORS is restricted to the configured allowlist while native clients without an Origin header remain supported.
+- Swagger remains available for development contract work but is no longer exposed by a production API process.
+- `/ready` now raises service-unavailable semantics when PostgreSQL cannot answer instead of returning a misleading HTTP 200 degraded response.
+- Secret scanning found only documented placeholders/test fixtures; no committed live-looking credential was found.
+
+### Slice 2 — Backup, recovery and deployment hardening
+
+- Production Compose now requires explicit PostgreSQL and Redis passwords instead of silently accepting repository defaults.
+- The authenticated Redis health check now uses the configured password.
+- Backup and restore scripts accept explicit container/user/database targets, validate the container and gzip archive, reject empty backups and require `CONFIRM_RESTORE=RESTORE` before destructive restoration.
+- Removed obsolete Compose version declarations.
+
+### Slice 3 — Documentation and operational handoff
+
+- Added `docs/API.md` with authentication, ownership, exact-kobo, realtime and recovery contracts.
+- Added `docs/RUNBOOK.md` with deployment, rollback, backup/restore, stuck-dispatch, payment-incident, outage and secret-rotation procedures.
+- Added `docs/ADMIN_GUIDE.md` with role-specific provider, dispatch, finance and reporting procedures.
+- Added `docs/HANDOVER.md` with client-owned accounts, environment ownership, release cadence, known limitations and final evidence requirements.
+- Updated the README for the unified Customer/Provider mobile application, development-client startup and exact-kobo journey command.
+
+### Phase 5 verification
+
+- Workspace lint: PASS with no warnings or errors.
+- Workspace typecheck: PASS across all five active packages.
+- API/shared regression suites: PASS (74 API + 4 shared).
+- API and admin production builds: PASS.
+- Live `pnpm e2e:journey`: PASS for FUEL, TOWING and LOCKOUT with 18 realtime updates and exact integer-kobo reconciliation:
+  - FUEL: 1,050,000 = 157,500 commission + 892,500 provider earning.
+  - TOWING: 1,578,150 = 236,722 commission + 1,341,428 provider earning.
+  - LOCKOUT: 800,000 = 120,000 commission + 680,000 provider earning.
+- Impeccable native hardening review was applied to the current map-first unified-app work; automated lint/typecheck pass. Physical-device visual, accessibility, background and battery-saver evidence is still required.
+
+### Remaining acceptance evidence
+
+- Complete the updated unified-app device matrix in `docs/DEVICE_TESTS.md`, including smallest supported screen, large text, TalkBack/VoiceOver, keyboard-open sheets, locked-phone push/location, weak/offline recovery and battery saver.
+- Run and record a production-like Compose deployment using a real secret file, then perform the documented backup/restore and rollback drills in an isolated environment.
+- Freeze new feature work after acceptance; subsequent changes are release defects, security fixes or store-readiness work only.

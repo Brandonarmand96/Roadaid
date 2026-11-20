@@ -4,6 +4,7 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3000),
   PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
+  CORS_ORIGINS: z.string().optional(),
   APP_TZ: z.string().default('Africa/Lagos'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
@@ -12,7 +13,7 @@ export const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
   OTP_TTL_SECONDS: z.coerce.number().default(300),
-  OTP_DEV_FIXED_CODE: z.string().default('123456'),
+  OTP_DEV_FIXED_CODE: z.string().optional(),
   SMS_PROVIDER: z.enum(['console', 'termii']).default('console'),
   TERMII_API_KEY: z.string().optional(),
   TERMII_SENDER_ID: z.string().default('RoadAid'),
@@ -30,6 +31,36 @@ export const envSchema = z.object({
   ADMIN_BOOTSTRAP_EMAIL: z.string().email().default('admin@roadaid.co'),
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(8).default('AdminSecurePassword2026!'),
   PAYMENT_MODE: z.enum(['ONLINE_AFTER_ACCEPT', 'ONLINE_ON_COMPLETION']).default('ONLINE_AFTER_ACCEPT'),
+}).superRefine((env, ctx) => {
+  if (env.NODE_ENV !== 'production') return;
+
+  const required = (key: keyof typeof env, message: string) => {
+    if (!env[key]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message });
+  };
+
+  required('CORS_ORIGINS', 'CORS_ORIGINS is required in production');
+  if (env.OTP_DEV_FIXED_CODE) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['OTP_DEV_FIXED_CODE'], message: 'OTP_DEV_FIXED_CODE must be unset in production' });
+  }
+  if (env.SMS_PROVIDER !== 'termii') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['SMS_PROVIDER'], message: 'SMS_PROVIDER must be termii in production' });
+  }
+  required('TERMII_API_KEY', 'TERMII_API_KEY is required in production');
+  if (env.JWT_ACCESS_SECRET.includes('development_') || env.JWT_REFRESH_SECRET.includes('development_')) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['JWT_ACCESS_SECRET'], message: 'Development JWT secrets are forbidden in production' });
+  }
+  if (env.ADMIN_BOOTSTRAP_PASSWORD === 'AdminSecurePassword2026!') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['ADMIN_BOOTSTRAP_PASSWORD'], message: 'The default bootstrap password is forbidden in production' });
+  }
+  if (env.PAYMENT_GATEWAY === 'paystack') {
+    required('PAYSTACK_SECRET_KEY', 'PAYSTACK_SECRET_KEY is required in production');
+    required('PAYSTACK_WEBHOOK_SECRET', 'PAYSTACK_WEBHOOK_SECRET is required in production');
+  }
+  if (env.STORAGE_DRIVER === 's3') {
+    required('S3_BUCKET', 'S3_BUCKET is required when STORAGE_DRIVER=s3');
+    required('S3_ACCESS_KEY_ID', 'S3_ACCESS_KEY_ID is required when STORAGE_DRIVER=s3');
+    required('S3_SECRET_ACCESS_KEY', 'S3_SECRET_ACCESS_KEY is required when STORAGE_DRIVER=s3');
+  }
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

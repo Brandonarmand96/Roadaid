@@ -2,7 +2,6 @@ import {
   Injectable,
   BadRequestException,
   UnauthorizedException,
-  ConflictException,
   Logger,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';

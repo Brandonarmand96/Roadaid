@@ -17,8 +17,17 @@ async function bootstrap() {
   const env = validateEnv(process.env);
   logger.log(`Starting RoadAid API in ${env.NODE_ENV} mode on port ${env.PORT}...`);
 
+  const allowedOrigins = env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) ?? [];
   const app = await NestFactory.create(AppModule, {
-    cors: true,
+    cors: env.NODE_ENV === 'production'
+      ? {
+          origin: (origin, callback) => {
+            if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+            return callback(new Error('Origin is not allowed by RoadAid CORS policy'), false);
+          },
+          credentials: true,
+        }
+      : true,
     rawBody: true,
   });
 
@@ -38,18 +47,20 @@ async function bootstrap() {
   });
 
   // Swagger OpenAPI documentation
-  const config = new DocumentBuilder()
-    .setTitle('RoadAid API')
-    .setDescription('RoadAid On-demand roadside assistance API for Abuja, Nigeria')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+  if (env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('RoadAid API')
+      .setDescription('RoadAid On-demand roadside assistance API for Abuja, Nigeria')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document);
+  }
 
   await app.listen(env.PORT, '0.0.0.0');
   logger.log(`RoadAid API running at http://localhost:${env.PORT}`);
-  logger.log(`API Documentation available at http://localhost:${env.PORT}/docs`);
+  if (env.NODE_ENV !== 'production') logger.log(`API Documentation available at http://localhost:${env.PORT}/docs`);
 }
 
 bootstrap().catch((err) => {
