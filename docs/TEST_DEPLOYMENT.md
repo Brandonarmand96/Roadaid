@@ -40,7 +40,8 @@ create extension if not exists pgcrypto;
 
 3. Create a **private** Storage bucket named `provider-documents`.
 4. Copy the project URL and service-role key. The service-role key is API-only; never put it in `EXPO_PUBLIC_*` or `NEXT_PUBLIC_*`.
-5. Copy the direct PostgreSQL URI and ensure it uses `sslmode=require`. Save it as `DATABASE_URL`.
+5. Click **Connect → Session pooler** and copy the shared-pooler URI ending in port `5432`. Render's free service uses IPv4, while Supabase's free direct `db.<project-ref>.supabase.co` endpoint is IPv6-only. The pooler username is `postgres.<project-ref>`, not just `postgres`; use the exact URI supplied by Supabase.
+6. Replace the password placeholder with the rotated database password, percent-encode any reserved characters, and append `?sslmode=require&connection_limit=5` (or add those parameters with `&` if the copied URI already contains `?`). Save this session-pooler URI as `DATABASE_URL`.
 
 The API runs `prisma migrate deploy` before startup. After the first deploy, verify the mandatory invariants:
 
@@ -75,7 +76,7 @@ The API selects it with `MAPS_PROVIDER=mapbox`. Never expose a secret Mapbox tok
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | Supabase PostgreSQL URI |
+| `DATABASE_URL` | Supabase **Session pooler** URI on port 5432 (never the IPv6-only direct `db.<ref>` URI) |
 | `REDIS_URL` | Upstash TLS URI |
 | `MAPBOX_ACCESS_TOKEN` | Mapbox trial public token |
 | `SUPABASE_URL` | Supabase project URL |

@@ -10,6 +10,7 @@
 - Verification: workspace typecheck PASS; workspace lint PASS with no warnings; API tests PASS (96/96) and shared tests PASS (4/4); API/admin production builds PASS. Physical MapLibre rendering, EAS native compilation and the three-surface online journey remain required after the external test accounts are provisioned.
 - Render Docker hotfix: copy the lockfile, install frozen dependencies, install OpenSSL, and generate Prisma Client before Nest compilation. A clean Linux `docker build -f infrastructure/docker/Dockerfile.api .` now passes without missing Prisma enums/`Decimal` or OpenSSL detection warnings.
 - Render startup hotfix: copy the API workspace `node_modules` links into the final pnpm image and invoke the workspace Prisma binary. Verified inside the final Linux image that Prisma 5.22 uses `linux-musl-openssl-3.0.x`, exports `RequestStatus` and `Prisma.Decimal`, and that the real container `CMD` reaches `prisma migrate deploy` (an intentionally unreachable database produced the expected `P1001`, not a missing executable).
+- Corrected the Supabase/Render network instructions: the free direct database hostname is IPv6-only, so the IPv4 Render service must use the dashboard-provided shared **Session pooler** URI on port 5432 with the `postgres.<project-ref>` username. Database credentials exposed in logs/chat must be rotated before redeploying.
 
 ## Phase 0: Foundation (COMPLETED)
 **Status:** Gate Passed / Ready for Phase 1  
