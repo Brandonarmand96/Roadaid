@@ -3,12 +3,32 @@ import { MapsService } from '../src/maps/maps.service';
 
 describe('MapsService', () => {
   const previousKey = process.env.GOOGLE_MAPS_SERVER_KEY;
-  afterEach(() => { process.env.GOOGLE_MAPS_SERVER_KEY = previousKey; });
+  const previousProvider = process.env.MAPS_PROVIDER;
+  const previousMapboxKey = process.env.MAPBOX_ACCESS_TOKEN;
+  afterEach(() => {
+    process.env.GOOGLE_MAPS_SERVER_KEY = previousKey;
+    process.env.MAPS_PROVIDER = previousProvider;
+    process.env.MAPBOX_ACCESS_TOKEN = previousMapboxKey;
+  });
 
   it('returns no suggestions for a query shorter than three characters without calling Google', async () => {
     delete process.env.GOOGLE_MAPS_SERVER_KEY;
     const service = new MapsService();
     await expect(service.autocomplete('ab')).resolves.toEqual([]);
+  });
+
+  it('maps Mapbox autocomplete features into the existing client contract', async () => {
+    process.env.MAPS_PROVIDER = 'mapbox';
+    process.env.MAPBOX_ACCESS_TOKEN = 'pk.test';
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      features: [{ id: 'place.1', text: 'Wuse 2', place_name: 'Wuse 2, Abuja, Nigeria' }],
+    }), { status: 200 }));
+    const service = new MapsService();
+    await expect(service.autocomplete('Wuse')).resolves.toEqual([{
+      placeId: 'place.1', description: 'Wuse 2, Abuja, Nigeria', primaryText: 'Wuse 2', secondaryText: 'Abuja, Nigeria',
+    }]);
+    expect(fetchSpy.mock.calls[0][0].toString()).toContain('api.mapbox.com');
+    fetchSpy.mockRestore();
   });
 
   it('fails clearly when search is requested without a server key', async () => {

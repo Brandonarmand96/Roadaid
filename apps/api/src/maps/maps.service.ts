@@ -4,13 +4,15 @@ type Coordinate = { lat: number; lng: number };
 
 @Injectable()
 export class MapsService {
-  private readonly key = process.env.GOOGLE_MAPS_SERVER_KEY;
+  private readonly provider = process.env.MAPS_PROVIDER === 'mapbox' ? 'mapbox' : 'google';
+  private readonly key = this.provider === 'mapbox' ? process.env.MAPBOX_ACCESS_TOKEN : process.env.GOOGLE_MAPS_SERVER_KEY;
 
   async autocomplete(input: string, location?: Coordinate) {
     const query = input.trim();
     if (query.length < 3) return [];
     if (location) this.validateCoordinate(location, 'location');
     const key = this.requireKey();
+    if (this.provider === 'mapbox') return this.mapboxAutocomplete(query, location, key);
     const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key },
@@ -43,6 +45,7 @@ export class MapsService {
   async place(placeId: string) {
     if (!placeId?.trim()) throw new BadRequestException({ code: 'PLACE_ID_REQUIRED', message: 'Choose a location from the search results' });
     const key = this.requireKey();
+    if (this.provider === 'mapbox') return this.mapboxPlace(placeId, key);
     const response = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
       headers: {
         'X-Goog-Api-Key': key,
@@ -65,6 +68,7 @@ export class MapsService {
   async reverse(location: Coordinate) {
     this.validateCoordinate(location, 'location');
     const key = this.requireKey();
+    if (this.provider === 'mapbox') return this.mapboxReverse(location, key);
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.searchParams.set('latlng', `${location.lat},${location.lng}`);
     url.searchParams.set('key', key);
@@ -81,6 +85,7 @@ export class MapsService {
     const fallback = { distanceMeters: this.haversine(origin, destination), durationSeconds: null, points: [origin, destination], source: 'STRAIGHT_LINE' };
     if (!this.key) return fallback;
     try {
+      if (this.provider === 'mapbox') return await this.mapboxRoute(origin, destination, fallback, this.key);
       const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
         method: 'POST',
         headers: {
@@ -116,6 +121,65 @@ export class MapsService {
     return this.key;
   }
 
+  private async mapboxAutocomplete(query: string, location: Coordinate | undefined, key: string) {
+    const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`);
+    url.searchParams.set('access_token', key);
+    url.searchParams.set('country', 'ng');
+    url.searchParams.set('autocomplete', 'true');
+    url.searchParams.set('limit', '5');
+    url.searchParams.set('proximity', `${location?.lng ?? 7.3986},${location?.lat ?? 9.0765}`);
+    const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const json = await this.readJson(response) as { features?: Array<{ id?: string; place_name?: string; text?: string; properties?: { short_code?: string } }> };
+    return (json.features ?? []).flatMap((feature) => feature.id && feature.place_name ? [{
+      placeId: feature.id,
+      description: feature.place_name,
+      primaryText: feature.text ?? feature.place_name,
+      secondaryText: feature.place_name.replace(feature.text ?? '', '').replace(/^,\s*/, ''),
+    }] : []);
+  }
+
+  private async mapboxPlace(placeId: string, key: string) {
+    const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(placeId)}.json`);
+    url.searchParams.set('access_token', key);
+    const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const json = await this.readJson(response) as { features?: Array<{ id?: string; place_name?: string; center?: [number, number] }> };
+    const feature = json.features?.[0];
+    if (!feature?.center || !Number.isFinite(feature.center[0]) || !Number.isFinite(feature.center[1])) {
+      throw new BadGatewayException({ code: 'PLACE_LOCATION_MISSING', message: 'The selected place has no usable location' });
+    }
+    return { placeId: feature.id ?? placeId, address: feature.place_name ?? 'Selected location', lat: feature.center[1], lng: feature.center[0] };
+  }
+
+  private async mapboxReverse(location: Coordinate, key: string) {
+    const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${location.lng},${location.lat}.json`);
+    url.searchParams.set('access_token', key);
+    url.searchParams.set('country', 'ng');
+    url.searchParams.set('limit', '1');
+    const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const json = await this.readJson(response) as { features?: Array<{ id?: string; place_name?: string }> };
+    const feature = json.features?.[0];
+    return { lat: location.lat, lng: location.lng, address: feature?.place_name ?? 'Dropped pin', placeId: feature?.id ?? null };
+  }
+
+  private async mapboxRoute(origin: Coordinate, destination: Coordinate, fallback: { distanceMeters: number; durationSeconds: null; points: Coordinate[]; source: string }, key: string) {
+    const coordinates = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
+    const url = new URL(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}`);
+    url.searchParams.set('access_token', key);
+    url.searchParams.set('geometries', 'geojson');
+    url.searchParams.set('overview', 'full');
+    const response = await fetch(url, { signal: AbortSignal.timeout(6_000) });
+    if (!response.ok) return fallback;
+    const json = await response.json() as { routes?: Array<{ distance?: number; duration?: number; geometry?: { coordinates?: Array<[number, number]> } }> };
+    const route = json.routes?.[0];
+    if (!route) return fallback;
+    return {
+      distanceMeters: Math.round(route.distance ?? fallback.distanceMeters),
+      durationSeconds: Number.isFinite(route.duration) ? Math.round(route.duration as number) : null,
+      points: route.geometry?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? fallback.points,
+      source: 'MAPBOX_DIRECTIONS',
+    };
+  }
+
   private validateCoordinate(value: Coordinate | undefined, field: string) {
     if (!value || !Number.isFinite(value.lat) || !Number.isFinite(value.lng) || value.lat < -90 || value.lat > 90 || value.lng < -180 || value.lng > 180) {
       throw new BadRequestException({ code: 'INVALID_COORDINATE', message: `${field} must contain a valid latitude and longitude` });
@@ -124,7 +188,7 @@ export class MapsService {
 
   private async readJson(response: Response) {
     const json = await response.json().catch(() => ({})) as Record<string, unknown>;
-    if (!response.ok) throw new BadGatewayException({ code: 'MAPS_UPSTREAM_ERROR', message: 'Google Maps could not complete this location request' });
+    if (!response.ok) throw new BadGatewayException({ code: 'MAPS_UPSTREAM_ERROR', message: 'The configured maps provider could not complete this location request' });
     return json;
   }
 

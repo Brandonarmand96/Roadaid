@@ -49,6 +49,7 @@ describe('Environment Config Validation', () => {
       CORS_ORIGINS: 'https://admin.roadaid.co',
       SMS_PROVIDER: 'termii',
       TERMII_API_KEY: 'termii-test-value',
+      GOOGLE_MAPS_SERVER_KEY: 'google-server-key',
       PAYSTACK_SECRET_KEY: 'sk_live_test-value',
       PAYSTACK_WEBHOOK_SECRET: 'sk_live_test-value',
       ADMIN_BOOTSTRAP_PASSWORD: 'a-unique-production-bootstrap-password',

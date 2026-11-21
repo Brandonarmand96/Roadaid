@@ -17,15 +17,20 @@ export const envSchema = z.object({
   SMS_PROVIDER: z.enum(['console', 'termii']).default('console'),
   TERMII_API_KEY: z.string().optional(),
   TERMII_SENDER_ID: z.string().default('RoadAid'),
+  MAPS_PROVIDER: z.enum(['google', 'mapbox']).default('google'),
   GOOGLE_MAPS_SERVER_KEY: z.string().optional(),
+  MAPBOX_ACCESS_TOKEN: z.string().optional(),
   PAYMENT_GATEWAY: z.enum(['paystack', 'flutterwave']).default('paystack'),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
-  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  STORAGE_DRIVER: z.enum(['local', 's3', 'supabase']).default('local'),
   S3_BUCKET: z.string().optional(),
   S3_REGION: z.string().default('eu-central-1'),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_STORAGE_BUCKET: z.string().default('provider-documents'),
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
   ADMIN_BOOTSTRAP_EMAIL: z.string().email().default('admin@roadaid.co'),
@@ -46,6 +51,8 @@ export const envSchema = z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['SMS_PROVIDER'], message: 'SMS_PROVIDER must be termii in production' });
   }
   required('TERMII_API_KEY', 'TERMII_API_KEY is required in production');
+  if (env.MAPS_PROVIDER === 'google') required('GOOGLE_MAPS_SERVER_KEY', 'GOOGLE_MAPS_SERVER_KEY is required when MAPS_PROVIDER=google');
+  if (env.MAPS_PROVIDER === 'mapbox') required('MAPBOX_ACCESS_TOKEN', 'MAPBOX_ACCESS_TOKEN is required when MAPS_PROVIDER=mapbox');
   if (env.JWT_ACCESS_SECRET.includes('development_') || env.JWT_REFRESH_SECRET.includes('development_')) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['JWT_ACCESS_SECRET'], message: 'Development JWT secrets are forbidden in production' });
   }
@@ -60,6 +67,10 @@ export const envSchema = z.object({
     required('S3_BUCKET', 'S3_BUCKET is required when STORAGE_DRIVER=s3');
     required('S3_ACCESS_KEY_ID', 'S3_ACCESS_KEY_ID is required when STORAGE_DRIVER=s3');
     required('S3_SECRET_ACCESS_KEY', 'S3_SECRET_ACCESS_KEY is required when STORAGE_DRIVER=s3');
+  }
+  if (env.STORAGE_DRIVER === 'supabase') {
+    required('SUPABASE_URL', 'SUPABASE_URL is required when STORAGE_DRIVER=supabase');
+    required('SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY is required when STORAGE_DRIVER=supabase');
   }
 });
 

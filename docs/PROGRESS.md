@@ -1,5 +1,14 @@
 # ROADAID — BUILD PROGRESS TRACKER
 
+## Test deployment branch — 21 Nov 2026
+
+- Created the isolated `test` branch for card-free online UAT; `master` remains unchanged.
+- Added a Google/Mapbox server provider switch while preserving the current maps API contract and straight-line fallback.
+- Replaced Google-specific mobile/admin test rendering with MapLibre and added private Supabase document storage.
+- Added a Render Blueprint backed by Supabase PostGIS and Upstash Redis, with migrations applied before API startup.
+- Restricted hosted test CORS, disabled Swagger outside local development, and documented provisioning, EAS builds, acceptance testing and cleanup in `docs/TEST_DEPLOYMENT.md`.
+- Verification: workspace typecheck PASS; workspace lint PASS with no warnings; API tests PASS (96/96) and shared tests PASS (4/4); API/admin production builds PASS. Physical MapLibre rendering, EAS native compilation and the three-surface online journey remain required after the external test accounts are provisioned.
+
 ## Phase 0: Foundation (COMPLETED)
 **Status:** Gate Passed / Ready for Phase 1  
 **Date:** 13 Nov 2026 (Timeline baseline: 9–11 Nov 2026)

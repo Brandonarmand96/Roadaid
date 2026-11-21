@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
-import MapView, { Marker, Region } from "react-native-maps";
+import MapView, { MapViewHandle, Marker, Region } from "./MapView";
 import { ArrowLeft, Crosshair, MapPin, Search } from "lucide-react-native";
 import * as Location from "expo-location";
 
@@ -15,7 +15,7 @@ export default function LocationPicker({ title, initial, token, apiRequest, onCo
   onConfirm: (point: Point) => void;
   onCancel: () => void;
 }) {
-  const map = useRef<MapView>(null);
+  const map = useRef<MapViewHandle>(null);
   const searchSequence = useRef(0);
   const reverseSequence = useRef(0);
   const [point, setPoint] = useState(initial);
@@ -80,8 +80,8 @@ export default function LocationPicker({ title, initial, token, apiRequest, onCo
 
   return (
     <SafeAreaView style={styles.safe}>
-      <MapView ref={map} style={StyleSheet.absoluteFill} initialRegion={region(point)} toolbarEnabled={false} showsUserLocation>
-        <Marker coordinate={{ latitude: point.lat, longitude: point.lng }} draggable title={title} onDragEnd={(event) => void reverse({ lat: event.nativeEvent.coordinate.latitude, lng: event.nativeEvent.coordinate.longitude })} />
+      <MapView ref={map} style={StyleSheet.absoluteFill} initialRegion={region(point)} toolbarEnabled={false} showsUserLocation onLongPress={(event) => void reverse({ lat: event.nativeEvent.coordinate.latitude, lng: event.nativeEvent.coordinate.longitude })}>
+        <Marker coordinate={{ latitude: point.lat, longitude: point.lng }} title={title} />
       </MapView>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.overlay} pointerEvents="box-none">
         <View style={styles.top}>

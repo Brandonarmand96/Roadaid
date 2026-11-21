@@ -20,7 +20,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { FuelType, LockType, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { MapViewHandle, Marker, Polyline } from "./MapView";
 import { Bell, Bike, Crosshair, History, LogOut, Phone, Truck, Wrench } from "lucide-react-native";
 import LocationPicker from "./LocationPicker";
 
@@ -820,7 +820,7 @@ function CustomerActiveMap({ request, position, ageSeconds, busy, error, payment
   token: string; apiRequest: <T>(path: string, options?: RequestInit, token?: string) => Promise<T>;
   onPay: () => void; onCancel: () => void; onHistory: () => void; onSignOut: () => void; onProviderMode?: () => void;
 }) {
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<MapViewHandle>(null);
   const [route, setRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const presentation = servicePresentation(request.serviceType);
   const pickup = { latitude: request.pickupLat || 9.0765, longitude: request.pickupLng || 7.3986 };

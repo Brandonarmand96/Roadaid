@@ -23,7 +23,7 @@ import * as SecureStore from "expo-secure-store";
 import * as TaskManager from "expo-task-manager";
 import { OnboardingStatus, Role, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { MapViewHandle, Marker, Polyline } from "./MapView";
 import { Clock3, Crosshair, Navigation, Power, UserRound } from "lucide-react-native";
 import CustomerExperience from "./CustomerExperience";
 
@@ -1196,7 +1196,7 @@ function ProviderCommandCenter({ point, token, availability, trackingState, comm
   onAccount: () => void;
 }) {
   const [, setTick] = useState(0);
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<MapViewHandle>(null);
   const [route, setRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
   useEffect(() => {
     if (!offers.length) return;

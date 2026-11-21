@@ -16,11 +16,10 @@ import {
   Activity,
   Banknote,
   Download,
-  MapPin,
   MessageSquareText,
 } from "lucide-react";
-import { APIProvider, Map, AdvancedMarker } from "@vis.gl/react-google-maps";
 import { io } from "socket.io-client";
+import { LiveMap } from "./LiveMap";
 
 function apiBaseUrl(value?: string) {
   const base = (value ?? "http://localhost:3000").replace(/\/+$/, "");
@@ -530,14 +529,7 @@ export default function AdminHomePage() {
         {live && (
           <section className="mb-8 grid xl:grid-cols-[1.6fr_0.9fr] bg-[#191D23] text-white rounded-2xl overflow-hidden">
             <div className="min-h-[390px] bg-slate-200">
-              {process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ? (
-                <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY}>
-                  <Map defaultCenter={{ lat: 9.0765, lng: 7.3986 }} defaultZoom={11} mapId="ROAD_AID_LIVE" gestureHandling="greedy" disableDefaultUI>
-                    {live.providers.map((provider) => <AdvancedMarker key={provider.providerId} position={{ lat: provider.lat, lng: provider.lng }} title={`${provider.fullName || "Provider"} · ${provider.availability}`}><div className={`w-4 h-4 rounded-full ring-4 ring-white/80 ${provider.availability === "BUSY" ? "bg-amber-500" : "bg-emerald-600"}`} /></AdvancedMarker>)}
-                    {live.activeRequests.map((request) => <AdvancedMarker key={request.id} position={{ lat: request.lat, lng: request.lng }} title={`${request.code} · ${request.status}`}><div className="w-5 h-5 rotate-45 bg-red-700 ring-4 ring-white/80" /></AdvancedMarker>)}
-                  </Map>
-                </APIProvider>
-              ) : <div className="h-full min-h-[390px] grid place-items-center text-center p-8 text-slate-700"><div><MapPin className="mx-auto" /><p className="font-black mt-3">Map key not configured</p><p className="text-sm mt-1">Set NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY to display provider markers.</p></div></div>}
+              <LiveMap providers={live.providers} requests={live.activeRequests} />
             </div>
             <div className="p-6 min-w-0">
               <div className="flex items-center gap-3"><Activity size={19} className="text-amber-300" /><h3 className="font-black text-xl">Live response field</h3></div>

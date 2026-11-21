@@ -3,6 +3,11 @@
 Recorded on: 9 Nov 2026 / 13 Nov 2026
 Reference: SPEC.md Section 19 & Blueprint Section 3
 
+## Test deployment decisions — 21 Nov 2026
+
+1. The isolated `test` branch may select Mapbox for authenticated search, geocoding and directions through `MAPS_PROVIDER=mapbox`, while MapLibre renders its tiles in mobile/admin. Google remains the production default required by the specification. Provider choice does not alter PostGIS dispatch, sequential offers, server-authoritative time, integer-kobo money or the one-active-job invariant.
+2. Supabase Free, Upstash Free, Render Free and Expo EAS Free are approved only for controlled test/UAT. Sleeping compute, pausing databases, finite quotas and absence of production backups prohibit this topology from serving live roadside operations.
+
 ## 1. Baseline Defaults and Assumptions
 1. **Payment timing:** Customer chooses in-app or cash before submitting. In-app payment is due after acceptance (`ONLINE_AFTER_ACCEPT`) and cash is confirmed by the assigned provider after arrival; either must be confirmed before service starts.
 2. **Cancellation fee:** ₦0 (0 kobo) until client sets specific commercial policy.
