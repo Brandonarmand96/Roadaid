@@ -9,6 +9,7 @@
 - Restricted hosted test CORS, disabled Swagger outside local development, and documented provisioning, EAS builds, acceptance testing and cleanup in `docs/TEST_DEPLOYMENT.md`.
 - Verification: workspace typecheck PASS; workspace lint PASS with no warnings; API tests PASS (96/96) and shared tests PASS (4/4); API/admin production builds PASS. Physical MapLibre rendering, EAS native compilation and the three-surface online journey remain required after the external test accounts are provisioned.
 - Render Docker hotfix: copy the lockfile, install frozen dependencies, install OpenSSL, and generate Prisma Client before Nest compilation. A clean Linux `docker build -f infrastructure/docker/Dockerfile.api .` now passes without missing Prisma enums/`Decimal` or OpenSSL detection warnings.
+- Render startup hotfix: copy the API workspace `node_modules` links into the final pnpm image and invoke the workspace Prisma binary. Verified inside the final Linux image that Prisma 5.22 uses `linux-musl-openssl-3.0.x`, exports `RequestStatus` and `Prisma.Decimal`, and that the real container `CMD` reaches `prisma migrate deploy` (an intentionally unreachable database produced the expected `P1001`, not a missing executable).
 
 ## Phase 0: Foundation (COMPLETED)
 **Status:** Gate Passed / Ready for Phase 1  
