@@ -73,6 +73,17 @@ export class AdminService {
   }
 
   getDispatchSettings() { return this.prisma.dispatchSettings.findMany({ orderBy: { serviceType: 'asc' } }); }
+  getCommissionSettings() { return this.prisma.commissionSettings.findMany({ orderBy: { serviceType: 'asc' } }); }
+
+  async updateCommissionSettings(serviceType: ServiceType, commissionBps: number, adminId: string, adminRole: string, ip?: string) {
+    if (!Number.isInteger(commissionBps) || commissionBps < 0 || commissionBps > 5_000)
+      throw new BadRequestException({ code: 'INVALID_COMMISSION', message: 'Commission must be a whole number from 0 to 5000 basis points' });
+    const before = await this.prisma.commissionSettings.findUnique({ where: { serviceType } });
+    if (!before) throw new NotFoundException({ code: 'COMMISSION_SETTINGS_NOT_FOUND', message: 'Commission settings not found' });
+    const after = await this.prisma.commissionSettings.update({ where: { serviceType }, data: { commissionBps, updatedBy: adminId } });
+    await this.auditService.log({ actorId: adminId, actorRole: adminRole, action: 'COMMISSION_SETTINGS_UPDATED', entityType: 'COMMISSION_SETTINGS', entityId: after.id, before, after, ip });
+    return after;
+  }
 
   async updateDispatchSettings(serviceType: ServiceType, dto: DispatchSettingsDto, adminId: string, adminRole: string, ip?: string) {
     const before = await this.prisma.dispatchSettings.findUnique({ where: { serviceType } });
@@ -120,6 +131,14 @@ export class AdminService {
     return this.prisma.supportCase.findMany({
       where: status ? { status } : undefined,
       include: { user: { select: { id: true, fullName: true, phone: true, role: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  getNotificationHistory() {
+    return this.prisma.notification.findMany({
+      include: { user: { select: { fullName: true, phone: true, role: true } } },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
@@ -174,9 +193,16 @@ export class AdminService {
       }),
     );
 
+    const [completedJobs, providerCancellations, commissionPolicy, walletBalanceKobo] = await Promise.all([
+      this.prisma.serviceRequest.count({ where: { providerId, status: RequestStatus.COMPLETED } }),
+      this.prisma.requestEvent.count({ where: { actorId: providerId, actorType: 'PROVIDER', type: 'CANCELLED' } }),
+      this.walletService.commissionPolicy(providerId),
+      this.walletService.balance(providerId),
+    ]);
     return {
       ...provider,
       documents: docsWithSignedUrls,
+      operationalStats: { completedJobs, providerCancellations, commissionDueKobo: commissionPolicy.dueKobo, commissionLimitKobo: commissionPolicy.limitKobo, commissionBlocked: commissionPolicy.blocked, walletBalanceKobo },
     };
   }
 
@@ -402,7 +428,7 @@ export class AdminService {
     const lagosNow = new Date(Date.now() + 60 * 60_000);
     const start = new Date(Date.UTC(lagosNow.getUTCFullYear(), lagosNow.getUTCMonth(), lagosNow.getUTCDate()) - 60 * 60_000);
     const activeStatuses = [RequestStatus.ASSIGNED, RequestStatus.EN_ROUTE, RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS];
-    const [requestsToday, activeJobs, completedToday, onlineProviders, escalatedCount, revenue, accepted] = await Promise.all([
+    const [requestsToday, activeJobs, completedToday, onlineProviders, escalatedCount, revenue, accepted, cancelledToday, offersToday, acceptedOffersToday, openSupportCases, pendingPayouts] = await Promise.all([
       this.prisma.serviceRequest.count({ where: { createdAt: { gte: start } } }),
       this.prisma.serviceRequest.count({ where: { status: { in: activeStatuses } } }),
       this.prisma.serviceRequest.count({ where: { status: RequestStatus.COMPLETED, completedAt: { gte: start } } }),
@@ -410,9 +436,14 @@ export class AdminService {
       this.prisma.serviceRequest.count({ where: { status: RequestStatus.ESCALATED } }),
       this.prisma.payment.aggregate({ where: { status: PaymentStatus.PAID, paidAt: { gte: start } }, _sum: { amountKobo: true } }),
       this.prisma.serviceRequest.findMany({ where: { acceptedAt: { not: null }, searchStartedAt: { gte: start } }, select: { acceptedAt: true, searchStartedAt: true } }),
+      this.prisma.serviceRequest.count({ where: { status: RequestStatus.CANCELLED, cancelledAt: { gte: start } } }),
+      this.prisma.dispatchOffer.count({ where: { offeredAt: { gte: start } } }),
+      this.prisma.dispatchOffer.count({ where: { offeredAt: { gte: start }, status: 'ACCEPTED' } }),
+      this.prisma.supportCase.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
+      this.prisma.payoutRequest.count({ where: { status: PayoutStatus.REQUESTED } }),
     ]);
     const avgTimeToAcceptSeconds = accepted.length ? Math.round(accepted.reduce((sum, row) => sum + ((row.acceptedAt!.getTime() - row.searchStartedAt.getTime()) / 1000), 0) / accepted.length) : 0;
-    return { requestsToday, activeJobs, completedToday, completionRateBps: requestsToday ? Math.floor(completedToday * 10_000 / requestsToday) : 0, onlineProviders, escalatedCount, revenueTodayKobo: revenue._sum.amountKobo || 0n, avgTimeToAcceptSeconds };
+    return { requestsToday, activeJobs, completedToday, completionRateBps: requestsToday ? Math.floor(completedToday * 10_000 / requestsToday) : 0, onlineProviders, escalatedCount, revenueTodayKobo: revenue._sum.amountKobo || 0n, avgTimeToAcceptSeconds, cancelledToday, cancellationRateBps: requestsToday ? Math.floor(cancelledToday * 10_000 / requestsToday) : 0, offersToday, offerAcceptanceRateBps: offersToday ? Math.floor(acceptedOffersToday * 10_000 / offersToday) : 0, openSupportCases, pendingPayouts };
   }
 
   async liveSnapshot() {

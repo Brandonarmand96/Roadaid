@@ -17,6 +17,11 @@ import {
   Banknote,
   Download,
   MessageSquareText,
+  LayoutDashboard,
+  UserRoundCheck,
+  Search,
+  Settings2,
+  ScrollText,
 } from "lucide-react";
 import { io } from "socket.io-client";
 import { LiveMap } from "./LiveMap";
@@ -55,6 +60,10 @@ type Provider = {
   user?: { fullName?: string | null; phone: string };
   services: Service[];
   documents?: Document[];
+  ratingAvg?: number | string;
+  ratingCount?: number;
+  completedJobs?: number;
+  operationalStats?: { completedJobs: number; providerCancellations: number; commissionDueKobo: number; commissionLimitKobo: number; commissionBlocked: boolean; walletBalanceKobo: number };
 };
 type PriceRule = {
   id: string;
@@ -67,6 +76,7 @@ type PriceRule = {
   active: boolean;
 };
 type DispatchSetting = { id: string; serviceType: string; offerTimeoutSeconds: number; searchRadiusKm: number; maxOffers: number; candidateShortlistSize: number; staleLocationSeconds: number; maxSearchDurationSeconds: number };
+type CommissionSetting = { id: string; serviceType: string; commissionBps: number };
 type RequestEvent = {
   id: string;
   type: string;
@@ -85,13 +95,17 @@ type RoadRequest = {
   events?: RequestEvent[];
   customer?: { phone: string; fullName?: string | null };
 };
-type Dashboard = { requestsToday: number; activeJobs: number; completedToday: number; completionRateBps: number; onlineProviders: number; escalatedCount: number; revenueTodayKobo: number; avgTimeToAcceptSeconds: number };
+type Dashboard = { requestsToday: number; activeJobs: number; completedToday: number; completionRateBps: number; onlineProviders: number; escalatedCount: number; revenueTodayKobo: number; avgTimeToAcceptSeconds: number; cancelledToday: number; cancellationRateBps: number; offersToday: number; offerAcceptanceRateBps: number; openSupportCases: number; pendingPayouts: number };
 type LiveProvider = { providerId: string; fullName?: string | null; availability: string; lat: number; lng: number; receivedAt: string };
 type LiveSnapshot = { providers: LiveProvider[]; activeRequests: Array<{ id: string; code: string; serviceType: string; status: string; pickupAddress: string; etaSeconds?: number | null; lat: number; lng: number }>; serverNow: string };
 type Payment = { id: string; requestId: string; reference: string; amountKobo: number; status: string; gateway: string; paidAt?: string | null; request: { code: string; serviceType: string; status: string; paymentStatus: string } };
 type Payout = { id: string; amountKobo: number; status: string; requestedAt: string; paidReference?: string | null; provider: { user: { fullName?: string | null; phone: string } } };
 type AdminRole = "SUPER_ADMIN" | "OPERATIONS" | "FINANCE";
 type SupportCase = { id: string; requestId?: string | null; subject: string; message: string; status: string; createdAt: string; user: { fullName?: string | null; phone: string; role: string } };
+type Customer = { id: string; phone: string; email?: string | null; fullName?: string | null; status: string; createdAt: string; _count: { serviceRequests: number; customerVehicles: number } };
+type AuditLog = { id: string; actorRole: string; action: string; entityType: string; entityId: string; createdAt: string };
+type AdminNotification = { id: string; title: string; body: string; readAt?: string | null; createdAt: string; user: { fullName?: string | null; phone: string; role: string } };
+type AdminView = "overview" | "requests" | "providers" | "customers" | "finance" | "support" | "settings" | "audit";
 
 function sessionFromToken(token: string): { role: AdminRole; expiresAt: number } | undefined {
   try {
@@ -145,6 +159,7 @@ export default function AdminHomePage() {
   const [busy, setBusy] = useState(false);
   const [prices, setPrices] = useState<PriceRule[]>([]);
   const [dispatchSettings, setDispatchSettings] = useState<DispatchSetting[]>([]);
+  const [commissionSettings, setCommissionSettings] = useState<CommissionSetting[]>([]);
   const [requests, setRequests] = useState<RoadRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<RoadRequest>();
   const [adminRole, setAdminRole] = useState<AdminRole>("SUPER_ADMIN");
@@ -153,6 +168,13 @@ export default function AdminHomePage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [supportCases, setSupportCases] = useState<SupportCase[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [notificationHistory, setNotificationHistory] = useState<AdminNotification[]>([]);
+  const [activeView, setActiveView] = useState<AdminView>("overview");
+  const [requestQuery, setRequestQuery] = useState("");
+  const [requestStatus, setRequestStatus] = useState("ALL");
+  const [providerQuery, setProviderQuery] = useState("");
   const [loadingData, setLoadingData] = useState(false);
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
@@ -167,10 +189,14 @@ export default function AdminHomePage() {
     setProviders([]);
     setPrices([]);
     setDispatchSettings([]);
+    setCommissionSettings([]);
     setRequests([]);
     setPayments([]);
     setPayouts([]);
     setSupportCases([]);
+    setCustomers([]);
+    setAuditLogs([]);
+    setNotificationHistory([]);
     setError(showExpiredMessage ? SESSION_EXPIRED_MESSAGE : "");
   }, []);
 
@@ -253,15 +279,15 @@ export default function AdminHomePage() {
       setAdminRole(role);
       setDashboard(await call<Dashboard>("/admin/dashboard", accessToken));
       if (role !== "FINANCE") {
-        const [providerData, priceData, dispatchData, requestData, liveData, supportData] = await Promise.all([
-          call<Provider[]>("/admin/providers", accessToken), call<PriceRule[]>("/admin/pricing", accessToken), call<DispatchSetting[]>("/admin/dispatch-settings", accessToken), call<RoadRequest[]>("/admin/requests", accessToken), call<LiveSnapshot>("/admin/live", accessToken), call<SupportCase[]>("/admin/support-cases", accessToken),
+        const [providerData, priceData, dispatchData, requestData, liveData, supportData, customerData, auditData, notificationData] = await Promise.all([
+          call<Provider[]>("/admin/providers", accessToken), call<PriceRule[]>("/admin/pricing", accessToken), call<DispatchSetting[]>("/admin/dispatch-settings", accessToken), call<RoadRequest[]>("/admin/requests", accessToken), call<LiveSnapshot>("/admin/live", accessToken), call<SupportCase[]>("/admin/support-cases", accessToken), call<{ items: Customer[] }>("/admin/customers", accessToken), call<{ items: AuditLog[] }>("/admin/audit-logs", accessToken), call<AdminNotification[]>("/admin/notifications", accessToken),
         ]);
-        setProviders(providerData); setPrices(priceData); setDispatchSettings(dispatchData); setRequests(requestData); setLive(liveData); setSupportCases(supportData);
+        setProviders(providerData); setPrices(priceData); setDispatchSettings(dispatchData); setRequests(requestData); setLive(liveData); setSupportCases(supportData); setCustomers(customerData.items); setAuditLogs(auditData.items); setNotificationHistory(notificationData);
         if (selected) await openProvider(selected.userId, accessToken);
       }
       if (role !== "OPERATIONS") {
-        const [paymentData, payoutData] = await Promise.all([call<Payment[]>("/admin/payments", accessToken), call<Payout[]>("/admin/payouts", accessToken)]);
-        setPayments(paymentData); setPayouts(payoutData);
+        const [paymentData, payoutData, commissionData] = await Promise.all([call<Payment[]>("/admin/payments", accessToken), call<Payout[]>("/admin/payouts", accessToken), call<CommissionSetting[]>("/admin/commission-settings", accessToken)]);
+        setPayments(paymentData); setPayouts(payoutData); setCommissionSettings(commissionData);
       }
     } finally { setLoadingData(false); }
   }
@@ -316,6 +342,13 @@ export default function AdminHomePage() {
     const maxOffers = window.prompt(`${setting.serviceType} maximum sequential offers`, String(setting.maxOffers));
     if (maxOffers === null) return;
     await mutate(`/admin/dispatch-settings/${setting.serviceType}`, { ...setting, offerTimeoutSeconds: Number(timeout), searchRadiusKm: Number(radius), maxOffers: Number(maxOffers) });
+  }
+  async function editCommission(setting: CommissionSetting) {
+    const percent = window.prompt(`${setting.serviceType} platform commission percentage`, String(setting.commissionBps / 100));
+    if (percent === null) return;
+    const commissionBps = Math.round(Number(percent) * 100);
+    if (!Number.isFinite(commissionBps)) return setError("Enter a valid commission percentage.");
+    await mutate(`/admin/commission-settings/${setting.serviceType}`, { commissionBps });
   }
   async function openRequest(id: string) {
     await act(async () =>
@@ -425,6 +458,26 @@ export default function AdminHomePage() {
     });
   }
 
+  const filteredRequests = requests.filter((item) => {
+    const query = requestQuery.trim().toLowerCase();
+    return (requestStatus === "ALL" || item.status === requestStatus) && (!query || [item.code, item.serviceType, item.pickupAddress, item.customer?.fullName, item.customer?.phone].some((value) => value?.toLowerCase().includes(query)));
+  });
+  const filteredProviders = providers.filter((provider) => {
+    const query = providerQuery.trim().toLowerCase();
+    return !query || [provider.user?.fullName, provider.user?.phone, provider.businessName, provider.vehiclePlate].some((value) => value?.toLowerCase().includes(query));
+  });
+  const attentionItems = (dashboard?.escalatedCount ?? 0) + supportCases.filter((item) => item.status === "OPEN").length + payouts.filter((item) => item.status === "REQUESTED").length + providers.filter((item) => item.onboardingStatus === "SUBMITTED").length;
+  const navigation: Array<{ id: AdminView; label: string; icon: React.ReactNode; badge?: number; roles?: AdminRole[] }> = [
+    { id: "overview", label: "Overview", icon: <LayoutDashboard size={18} />, badge: attentionItems },
+    { id: "requests", label: "Requests", icon: <ReceiptText size={18} />, roles: ["SUPER_ADMIN", "OPERATIONS"] },
+    { id: "providers", label: "Providers", icon: <UserRoundCheck size={18} />, badge: providers.filter((item) => item.onboardingStatus === "SUBMITTED").length, roles: ["SUPER_ADMIN", "OPERATIONS"] },
+    { id: "customers", label: "Customers", icon: <Users size={18} />, roles: ["SUPER_ADMIN", "OPERATIONS"] },
+    { id: "finance", label: "Finance", icon: <Banknote size={18} />, badge: payouts.filter((item) => item.status === "REQUESTED").length, roles: ["SUPER_ADMIN", "FINANCE"] },
+    { id: "support", label: "Support", icon: <MessageSquareText size={18} />, badge: supportCases.filter((item) => item.status === "OPEN").length, roles: ["SUPER_ADMIN", "OPERATIONS"] },
+    { id: "settings", label: "Configuration", icon: <Settings2 size={18} />, roles: ["SUPER_ADMIN", "OPERATIONS"] },
+    { id: "audit", label: "Audit log", icon: <ScrollText size={18} />, roles: ["SUPER_ADMIN", "OPERATIONS"] },
+  ];
+
   if (!token)
     return (
       <main className="min-h-screen bg-[#191D23] text-slate-100 grid place-items-center p-6">
@@ -473,14 +526,21 @@ export default function AdminHomePage() {
 
   return (
     <main className="min-h-screen bg-[#f5f1e8] text-slate-900">
+      <div className="lg:grid lg:grid-cols-[248px_minmax(0,1fr)] min-h-screen">
+      <aside className="bg-[#191D23] text-white border-r border-[#363B44] lg:sticky lg:top-0 lg:h-screen flex flex-col">
+        <div className="h-20 px-5 flex items-center gap-3 border-b border-[#363B44]"><BrandMark /><div><p className="font-black">RoadAid</p><p className="text-[10px] text-amber-300 font-black tracking-[0.15em]">OPERATIONS</p></div></div>
+        <nav className="p-3 flex lg:flex-col gap-1 overflow-x-auto" aria-label="Operations sections">
+          {navigation.filter((item) => !item.roles || item.roles.includes(adminRole)).map((item) => <button key={item.id} onClick={() => setActiveView(item.id)} aria-current={activeView === item.id ? "page" : undefined} className={`min-h-11 px-3 rounded-xl flex items-center gap-3 text-sm font-bold whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-amber-300 ${activeView === item.id ? "bg-[#F4AE3E] text-[#191D23]" : "text-slate-300 hover:bg-[#252A32] hover:text-white"}`}>{item.icon}<span className="flex-1 text-left">{item.label}</span>{item.badge ? <span className={`min-w-6 h-6 px-1.5 rounded-full grid place-items-center text-xs ${activeView === item.id ? "bg-[#191D23] text-white" : "bg-red-500 text-white"}`}>{item.badge}</span> : null}</button>)}
+        </nav>
+        <div className="mt-auto p-4 border-t border-[#363B44]"><p className="text-xs text-slate-400">Signed in as</p><p className="text-sm font-black mt-1">{adminRole.replace("_", " ")}</p></div>
+      </aside>
+      <div className="min-w-0">
       <header className="h-20 bg-[#191D23] text-white px-6 flex items-center justify-between border-b border-[#363B44]">
         <div className="flex items-center gap-3">
           <BrandMark />
           <div>
             <h1 className="font-black">RoadAid Operations</h1>
-            <p className="text-amber-300 text-[9px] font-black tracking-[0.18em]">
-              ABUJA PROVIDER REVIEW
-            </p>
+            <p className="text-amber-300 text-[9px] font-black tracking-[0.18em]">ABUJA CONTROL CENTRE</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -503,7 +563,7 @@ export default function AdminHomePage() {
         </div>
       </header>
       <div className="max-w-[1440px] mx-auto p-6">
-        <section className="mb-8" aria-busy={loadingData}>
+        {activeView === "overview" && <section className="mb-8" aria-busy={loadingData}>
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <h2 className="text-3xl font-black tracking-[-0.03em]">Today across RoadAid</h2>
@@ -512,7 +572,7 @@ export default function AdminHomePage() {
             <Status value={loadingData ? "REFRESHING" : adminRole.replace("_", " ")} />
           </div>
           {dashboard ? (
-            <div className="mt-6 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 border-y border-[#c8c1b4] divide-x divide-[#d8d2c5] bg-[#fffdf8]">
+            <><div className="mt-6 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 border-y border-[#c8c1b4] divide-x divide-[#d8d2c5] bg-[#fffdf8]">
               <Metric label="Requests" value={dashboard.requestsToday} />
               <Metric label="Active jobs" value={dashboard.activeJobs} />
               <Metric label="Completed" value={dashboard.completedToday} />
@@ -521,12 +581,12 @@ export default function AdminHomePage() {
               <Metric label="Escalated" value={dashboard.escalatedCount} alert={dashboard.escalatedCount > 0} />
               <Metric label="Revenue" value={money(dashboard.revenueTodayKobo)} />
               <Metric label="Accept time" value={`${dashboard.avgTimeToAcceptSeconds}s`} />
-            </div>
+            </div><div className="mt-4 grid sm:grid-cols-2 xl:grid-cols-4 bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl divide-y sm:divide-y-0 sm:divide-x divide-[#e4ded3]"><Metric label="Offer acceptance" value={`${(dashboard.offerAcceptanceRateBps / 100).toFixed(1)}%`} /><Metric label="Cancellation rate" value={`${(dashboard.cancellationRateBps / 100).toFixed(1)}%`} alert={dashboard.cancellationRateBps > 1500} /><Metric label="Support workload" value={dashboard.openSupportCases} alert={dashboard.openSupportCases > 0} /><Metric label="Pending payouts" value={dashboard.pendingPayouts} alert={dashboard.pendingPayouts > 0} /></div></>
           ) : <div className="mt-6 p-6 bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl text-slate-600">Dashboard figures are unavailable. Refresh to try again.</div>}
-        </section>
+        </section>}
         {error && <ErrorMessage message={error} />}
         {adminRole !== "FINANCE" && <>
-        {live && (
+        {activeView === "overview" && live && (
           <section className="mb-8 grid xl:grid-cols-[1.6fr_0.9fr] bg-[#191D23] text-white rounded-2xl overflow-hidden">
             <div className="min-h-[390px] bg-slate-200">
               <LiveMap providers={live.providers} requests={live.activeRequests} />
@@ -540,6 +600,8 @@ export default function AdminHomePage() {
             </div>
           </section>
         )}
+        {activeView === "overview" && <section className="mb-8 bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden"><div className="p-5 border-b border-[#d8d2c5]"><h3 className="font-black text-xl">Requires attention</h3><p className="text-sm text-slate-500 mt-1">Work that could delay a customer, provider or payment.</p></div><div className="grid sm:grid-cols-2 xl:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[#e4ded3]"><AttentionItem label="Escalated requests" value={dashboard?.escalatedCount ?? 0} onClick={() => { setRequestStatus("ESCALATED"); setActiveView("requests"); }} /><AttentionItem label="Provider applications" value={providers.filter((item) => item.onboardingStatus === "SUBMITTED").length} onClick={() => setActiveView("providers")} /><AttentionItem label="Open support cases" value={supportCases.filter((item) => item.status === "OPEN").length} onClick={() => setActiveView("support")} /><AttentionItem label="Payout approvals" value={payouts.filter((item) => item.status === "REQUESTED").length} onClick={() => setActiveView("finance")} /></div></section>}
+        {activeView === "providers" && <>
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-7">
           <div>
             <h2 className="text-3xl font-black tracking-[-0.03em]">
@@ -571,10 +633,11 @@ export default function AdminHomePage() {
             <div className="px-5 py-4 border-b border-[#d8d2c5] text-xs font-black tracking-wider text-slate-500">
               APPLICATION QUEUE
             </div>
-            {providers.length === 0 ? (
+            <div className="p-4 border-b border-[#d8d2c5] relative"><Search size={17} className="absolute left-7 top-7 text-slate-400" /><input value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} placeholder="Search name, phone or plate" className="w-full h-11 pl-10 pr-3 rounded-xl border border-[#c8c1b4] bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" /></div>
+            {filteredProviders.length === 0 ? (
               <Empty />
             ) : (
-              providers.map((provider) => (
+              filteredProviders.map((provider) => (
                 <button
                   key={provider.userId}
                   onClick={() => void openProvider(provider.userId)}
@@ -631,8 +694,9 @@ export default function AdminHomePage() {
             )}
           </section>
         </div>
+        </>}
         <div className="grid xl:grid-cols-2 gap-6 mt-8">
-          <section className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden">
+          {activeView === "settings" && <section className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden xl:col-span-2">
             <div className="px-5 py-4 border-b border-[#d8d2c5] flex items-center gap-3">
               <SlidersHorizontal size={18} className="text-amber-800" />
               <div>
@@ -674,8 +738,8 @@ export default function AdminHomePage() {
             </div>
             <div className="px-5 py-4 border-y border-[#d8d2c5]"><h3 className="font-black">Dispatch controls</h3><p className="text-sm text-slate-500 mt-1">Sequential offer timing and provider search limits.</p></div>
             <div className="divide-y divide-[#e4ded3]">{dispatchSettings.map((setting) => <div key={setting.id} className="p-5 flex items-center justify-between gap-5"><div><p className="font-black">{setting.serviceType}</p><p className="text-sm text-slate-600 mt-2 tabular-nums">{setting.offerTimeoutSeconds}s offer · {setting.searchRadiusKm}km radius · {setting.maxOffers} attempts</p><p className="text-xs text-slate-500 mt-1">Fresh GPS within {setting.staleLocationSeconds}s · search up to {Math.round(setting.maxSearchDurationSeconds / 60)} min</p></div><Action label="Edit dispatch" onClick={() => void editDispatch(setting)} /></div>)}</div>
-          </section>
-          <section className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden">
+          </section>}
+          {activeView === "requests" && <section className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden xl:col-span-2">
             <div className="px-5 py-4 border-b border-[#d8d2c5] flex items-center gap-3">
               <ReceiptText size={18} className="text-amber-800" />
               <div>
@@ -685,13 +749,14 @@ export default function AdminHomePage() {
                 </p>
               </div>
             </div>
-            {requests.length === 0 ? (
+            <div className="p-4 border-b border-[#d8d2c5] grid md:grid-cols-[1fr_220px] gap-3"><div className="relative"><Search size={17} className="absolute left-3 top-3.5 text-slate-400" /><input value={requestQuery} onChange={(event) => setRequestQuery(event.target.value)} placeholder="Search code, customer, phone or address" className="w-full h-11 pl-10 pr-3 rounded-xl border border-[#c8c1b4] bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" /></div><select value={requestStatus} onChange={(event) => setRequestStatus(event.target.value)} className="h-11 px-3 rounded-xl border border-[#c8c1b4] bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" aria-label="Filter request status"><option value="ALL">All statuses</option>{["REQUESTED","SEARCHING","ASSIGNED","EN_ROUTE","ARRIVED","IN_PROGRESS","COMPLETED","CANCELLED","ESCALATED"].map((status) => <option key={status}>{status}</option>)}</select></div>
+            {filteredRequests.length === 0 ? (
               <div className="p-10 text-center text-slate-500">
                 Customer requests will appear here.
               </div>
             ) : (
               <div className="divide-y divide-[#e4ded3]">
-                {requests.map((item) => (
+                {filteredRequests.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => void openRequest(item.id)}
@@ -742,17 +807,20 @@ export default function AdminHomePage() {
                 </div>
               </div>
             )}
-          </section>
+          </section>}
         </div>
         </>}
-        {adminRole !== "FINANCE" && (
+        {activeView === "customers" && adminRole !== "FINANCE" && <section className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden"><div className="p-5 border-b border-[#d8d2c5]"><h2 className="text-2xl font-black">Customers</h2><p className="text-sm text-slate-500 mt-1">Account activity, saved vehicles and request volume.</p></div><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-[#eee9df] text-left text-slate-600"><tr><th className="p-4">Customer</th><th className="p-4">Phone</th><th className="p-4">Requests</th><th className="p-4">Vehicles</th><th className="p-4">Status</th><th className="p-4">Joined</th></tr></thead><tbody className="divide-y divide-[#e4ded3]">{customers.map((customer) => <tr key={customer.id}><td className="p-4 font-black">{customer.fullName || "Unnamed customer"}</td><td className="p-4 tabular-nums">{customer.phone}</td><td className="p-4 tabular-nums">{customer._count.serviceRequests}</td><td className="p-4 tabular-nums">{customer._count.customerVehicles}</td><td className="p-4"><Status value={customer.status} /></td><td className="p-4 text-slate-500">{new Date(customer.createdAt).toLocaleDateString("en-NG")}</td></tr>)}</tbody></table></div>{!customers.length ? <EmptyMessage title="No customer accounts" body="Customer registrations will appear here." /> : null}</section>}
+        {activeView === "audit" && adminRole !== "FINANCE" && <div className="space-y-6"><section className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden"><div className="p-5 border-b border-[#d8d2c5]"><h2 className="text-2xl font-black">Audit log</h2><p className="text-sm text-slate-500 mt-1">Immutable accountability for administrative changes.</p></div><div className="divide-y divide-[#e4ded3]">{auditLogs.map((entry) => <div key={entry.id} className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-3"><div><p className="font-black">{entry.action.replaceAll("_", " ")}</p><p className="text-sm text-slate-500 mt-1">{entry.actorRole} · {entry.entityType} · {entry.entityId}</p></div><time className="text-sm text-slate-500 tabular-nums">{new Date(entry.createdAt).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}</time></div>)}{!auditLogs.length ? <EmptyMessage title="No administrative changes" body="Audited actions will appear here." /> : null}</div></section><section className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden"><div className="p-5 border-b border-[#d8d2c5]"><h2 className="text-2xl font-black">Notification history</h2><p className="text-sm text-slate-500 mt-1">Operational messages stored for customer and provider inboxes.</p></div><div className="divide-y divide-[#e4ded3] max-h-[540px] overflow-y-auto">{notificationHistory.map((item) => <div key={item.id} className="p-5 flex items-start justify-between gap-4"><div><p className="font-black">{item.title}</p><p className="text-sm mt-1">{item.body}</p><p className="text-xs text-slate-500 mt-2">{item.user.fullName || item.user.phone} · {item.user.role}</p></div><div className="text-right shrink-0"><Status value={item.readAt ? "READ" : "UNREAD"} /><p className="text-xs text-slate-500 mt-2">{new Date(item.createdAt).toLocaleString("en-NG")}</p></div></div>)}</div></section></div>}
+        {activeView === "support" && adminRole !== "FINANCE" && (
           <section className="mt-8 bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden">
             <div className="p-5 border-b border-[#d8d2c5] flex items-center gap-3"><MessageSquareText size={19} className="text-amber-800" /><div><h3 className="font-black">Customer and provider support</h3><p className="text-sm text-slate-500">Persisted help requests assigned to Operations.</p></div></div>
             <div className="divide-y divide-[#e4ded3] max-h-[520px] overflow-y-auto">{supportCases.length ? supportCases.map((item) => <div key={item.id} className="p-5"><div className="flex items-start justify-between gap-4"><div><p className="font-black">{item.subject}</p><p className="text-sm text-slate-600 mt-1">{item.user.fullName || item.user.phone} · {item.user.role}</p><p className="text-sm mt-3 whitespace-pre-wrap">{item.message}</p><p className="text-xs text-slate-500 mt-2">{new Date(item.createdAt).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}{item.requestId ? ` · Request ${item.requestId}` : ""}</p></div><Status value={item.status} /></div><div className="flex flex-wrap gap-2 mt-4">{item.status === "OPEN" ? <Action label="Start review" onClick={() => void mutate(`/admin/support-cases/${item.id}/status`, { status: "IN_PROGRESS" })} /> : null}{item.status !== "RESOLVED" ? <Action label="Resolve" onClick={() => void mutate(`/admin/support-cases/${item.id}/status`, { status: "RESOLVED" })} /> : null}</div></div>) : <EmptyMessage title="No support cases" body="New customer and provider help requests will appear here." />}</div>
           </section>
         )}
-        {adminRole !== "OPERATIONS" && (
+        {activeView === "finance" && adminRole !== "OPERATIONS" && (
           <section className="mt-8 grid xl:grid-cols-2 gap-6">
+            <div className="xl:col-span-2 bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden"><div className="p-5 border-b border-[#d8d2c5]"><h3 className="font-black">Commission configuration</h3><p className="text-sm text-slate-500 mt-1">Applies to newly created requests; existing jobs retain their locked commission.</p></div><div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-[#e4ded3]">{commissionSettings.map((setting) => <div key={setting.id} className="p-5"><p className="font-black">{setting.serviceType}</p><p className="text-3xl font-black mt-2 tabular-nums">{(setting.commissionBps / 100).toFixed(2)}%</p><Action label="Edit commission" onClick={() => void editCommission(setting)} /></div>)}</div></div>
             <div className="bg-[#fffdf8] border border-[#d8d2c5] rounded-2xl overflow-hidden">
               <div className="p-5 border-b border-[#d8d2c5] flex items-center justify-between gap-4"><div className="flex items-center gap-3"><Banknote size={19} className="text-amber-800" /><div><h3 className="font-black">Payments</h3><p className="text-sm text-slate-500">Latest customer collections and refunds.</p></div></div><Action label="Revenue CSV" onClick={() => void downloadReport("revenue")} /></div>
               <div className="divide-y divide-[#e4ded3] max-h-[520px] overflow-y-auto">{payments.length ? payments.map((payment) => {
@@ -768,6 +836,8 @@ export default function AdminHomePage() {
             <div className="xl:col-span-2 flex flex-wrap items-end gap-3 p-5 bg-[#191D23] text-white rounded-2xl"><Download size={18} className="text-[#F4AE3E] self-center" /><p className="font-black mr-auto self-center">Operational reports</p><label className="text-xs font-bold"><span className="block mb-1 text-slate-300">From</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} className="h-10 rounded-xl bg-[#252A32] border border-slate-600 px-3 text-white focus:outline-none focus:ring-2 focus:ring-[#F4AE3E]" /></label><label className="text-xs font-bold"><span className="block mb-1 text-slate-300">To</span><input type="date" value={reportTo} min={reportFrom || undefined} onChange={(event) => setReportTo(event.target.value)} className="h-10 rounded-xl bg-[#252A32] border border-slate-600 px-3 text-white focus:outline-none focus:ring-2 focus:ring-[#F4AE3E]" /></label><Action label="Requests CSV" onClick={() => void downloadReport("requests")} /><Action label="Providers CSV" onClick={() => void downloadReport("providers")} /></div>
           </section>
         )}
+      </div>
+      </div>
       </div>
     </main>
   );
@@ -829,6 +899,7 @@ function ProviderDetail({
           />
         </div>
       </div>
+      {provider.operationalStats ? <div className="grid grid-cols-2 lg:grid-cols-4 border-b border-[#d8d2c5] divide-x divide-[#e4ded3]"><Metric label="Completed jobs" value={provider.operationalStats.completedJobs} /><Metric label="Provider cancellations" value={provider.operationalStats.providerCancellations} alert={provider.operationalStats.providerCancellations > 2} /><Metric label="Commission due" value={money(provider.operationalStats.commissionDueKobo)} alert={provider.operationalStats.commissionBlocked} /><Metric label="Wallet balance" value={money(provider.operationalStats.walletBalanceKobo)} /></div> : null}
       <div className="p-6">
         <h4 className="text-xs font-black tracking-wider text-slate-500 mb-3">
           SERVICE CAPABILITIES
@@ -969,6 +1040,9 @@ function Status({ value }: { value: string }) {
 }
 function Metric({ label, value, alert }: { label: string; value: string | number; alert?: boolean }) {
   return <div className="px-4 py-5 min-w-0"><p className="text-xs text-slate-500">{label}</p><p className={`font-black tabular-nums mt-1 truncate ${alert ? "text-red-700" : "text-slate-900"}`} title={String(value)}>{value}</p></div>;
+}
+function AttentionItem({ label, value, onClick }: { label: string; value: number; onClick: () => void }) {
+  return <button onClick={onClick} className="p-5 text-left hover:bg-amber-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-amber-400"><span className={`text-3xl font-black tabular-nums ${value ? "text-red-700" : "text-emerald-700"}`}>{value}</span><span className="block text-sm font-bold mt-1">{label}</span><span className="block text-xs text-slate-500 mt-2">{value ? "Open queue" : "Nothing waiting"}</span></button>;
 }
 function EmptyMessage({ title, body }: { title: string; body: string }) {
   return <div className="p-10 text-center"><p className="font-black">{title}</p><p className="text-sm text-slate-500 mt-1">{body}</p></div>;

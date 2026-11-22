@@ -34,6 +34,8 @@ The REST API is served under `/v1`; Socket.IO uses the API origin without the `/
 | Wallet/payout | `/v1/provider/wallet`, `/earnings`, `/bank-account`, `/payouts` | Provider |
 | Admin operations | `/v1/admin/*` | ADMIN plus `AdminRole` guard |
 | Admin support | `GET /v1/admin/support-cases`, `POST /:id/status` | Operations/Super Admin |
+| Admin commission | `GET/POST /v1/admin/commission-settings/:serviceType` | Finance/Super Admin |
+| Admin notification history | `GET /v1/admin/notifications` | Operations/Super Admin |
 
 ## Exact-value rules
 
