@@ -640,6 +640,16 @@ Phase 3 dispatch is now authorized.
 - Added provider notification inbox read controls alongside the customer inbox.
 - Added persisted customer/provider support cases, request ownership validation, an Operations queue, audited status changes and admin dashboard controls.
 - Verification: Prisma generation, workspace lint/typecheck/build PASS; API regression suite PASS (95/95), including scheduled-window, private-share, reciprocal-rating and support ownership assertions.
+
+### Phase 5 operations control-centre redesign — 22 Nov 2026
+
+- Replaced the single scrolling admin page with a role-aware Operations application shell covering Overview, Requests, Providers, Customers, Finance, Support, Configuration and Audit Log.
+- Added an urgent-work queue with badges for escalated requests, submitted provider applications, open support cases and pending payouts.
+- Added local search and status filtering for request and provider queues, customer account visibility, stored notification history and clearer empty/loading/error states.
+- Added marketplace-health measures for offer acceptance, cancellations, support workload and payout backlog alongside live operational KPIs.
+- Added audited per-service commission configuration using integer basis points; existing jobs retain their locked commission snapshot.
+- Enriched provider review with completed jobs, provider cancellations, commission debt/blocking state and wallet balance.
+- Verification: workspace lint/typecheck/build PASS; API regression suite PASS (98/98), including audited commission validation and redacted notification-history coverage.
 - Commission-sensitive targeted suites: PASS (41/41 across dispatch, provider availability, request state, payments and wallet).
 - API and admin production builds: PASS.
 - Physical push delivery, 24-hour reminder deduplication and at-limit device behavior remain listed acceptance evidence in `docs/DEVICE_TESTS.md`.

@@ -51,6 +51,16 @@ export class AdminController {
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   getDispatchSettings() { return this.adminService.getDispatchSettings(); }
 
+  @Get('commission-settings')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  getCommissionSettings() { return this.adminService.getCommissionSettings(); }
+
+  @Post('commission-settings/:serviceType')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.FINANCE)
+  updateCommissionSettings(@Param('serviceType') serviceType: ServiceType, @Body('commissionBps') commissionBps: number, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) {
+    return this.adminService.updateCommissionSettings(serviceType, commissionBps, admin.id, admin.adminRole || 'ADMIN', req.ip);
+  }
+
   @Post('dispatch-settings/:serviceType')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   updateDispatchSettings(@Param('serviceType') serviceType: ServiceType, @Body(new ZodValidationPipe(dispatchSettingsSchema)) dto: DispatchSettingsDto, @CurrentUser() admin: AuthenticatedUser, @Req() req: any) {
@@ -102,6 +112,10 @@ export class AdminController {
   @Get('support-cases')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
   supportCases(@Query('status') status?: string) { return this.adminService.getSupportCases(status); }
+
+  @Get('notifications')
+  @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
+  notifications() { return this.adminService.getNotificationHistory(); }
 
   @Post('support-cases/:id/status')
   @AdminRoles(AdminRole.SUPER_ADMIN, AdminRole.OPERATIONS)
