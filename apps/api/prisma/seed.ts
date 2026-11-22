@@ -9,21 +9,19 @@ async function main() {
   // 1. Bootstrap Super Admin
   const adminEmail = process.env.ADMIN_BOOTSTRAP_EMAIL || 'admin@roadaid.co';
   const adminPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD || 'AdminSecurePassword2026!';
-  const passwordHash = await argon2.hash(adminPassword);
-
-  const admin = await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: {
-      passwordHash,
+  const bootstrapPhone = '+2348000000000';
+  const existingAdmin = await prisma.user.findFirst({
+    where: {
       role: Role.ADMIN,
-      adminRole: AdminRole.SUPER_ADMIN,
-      status: UserStatus.ACTIVE,
+      OR: [{ email: adminEmail }, { phone: bootstrapPhone }],
     },
-    create: {
+  });
+  const admin = existingAdmin ?? await prisma.user.create({
+    data: {
       email: adminEmail,
-      phone: '+2348000000000',
+      phone: bootstrapPhone,
       fullName: 'RoadAid Super Admin',
-      passwordHash,
+      passwordHash: await argon2.hash(adminPassword),
       role: Role.ADMIN,
       adminRole: AdminRole.SUPER_ADMIN,
       status: UserStatus.ACTIVE,
@@ -35,15 +33,7 @@ async function main() {
   // FUEL: Base ₦3,000 (300000 kobo), ₦1,500/litre (150000 kobo), min ₦3,000
   await prisma.pricingRule.upsert({
     where: { serviceType: ServiceType.FUEL },
-    update: {
-      baseKobo: BigInt(300000),
-      perLitreKobo: BigInt(150000),
-      perKmKobo: BigInt(0),
-      minKobo: BigInt(300000),
-      towingFreeKm: 0,
-      active: true,
-      updatedBy: admin.id,
-    },
+    update: {},
     create: {
       serviceType: ServiceType.FUEL,
       baseKobo: BigInt(300000),
@@ -59,15 +49,7 @@ async function main() {
   // TOWING: Base ₦15,000 (1500000 kobo), ₦500/km (50000 kobo), min ₦15,000
   await prisma.pricingRule.upsert({
     where: { serviceType: ServiceType.TOWING },
-    update: {
-      baseKobo: BigInt(1500000),
-      perLitreKobo: BigInt(0),
-      perKmKobo: BigInt(50000),
-      minKobo: BigInt(1500000),
-      towingFreeKm: 0,
-      active: true,
-      updatedBy: admin.id,
-    },
+    update: {},
     create: {
       serviceType: ServiceType.TOWING,
       baseKobo: BigInt(1500000),
@@ -83,15 +65,7 @@ async function main() {
   // LOCKOUT: Base ₦8,000 (800000 kobo), min ₦8,000
   await prisma.pricingRule.upsert({
     where: { serviceType: ServiceType.LOCKOUT },
-    update: {
-      baseKobo: BigInt(800000),
-      perLitreKobo: BigInt(0),
-      perKmKobo: BigInt(0),
-      minKobo: BigInt(800000),
-      towingFreeKm: 0,
-      active: true,
-      updatedBy: admin.id,
-    },
+    update: {},
     create: {
       serviceType: ServiceType.LOCKOUT,
       baseKobo: BigInt(800000),
@@ -109,15 +83,7 @@ async function main() {
   // FUEL: 30s timeout, 15km, max 5 offers, shortlist 5, stale 90s, max 600s
   await prisma.dispatchSettings.upsert({
     where: { serviceType: ServiceType.FUEL },
-    update: {
-      offerTimeoutSeconds: 30,
-      searchRadiusKm: 15,
-      maxOffers: 5,
-      candidateShortlistSize: 5,
-      staleLocationSeconds: 90,
-      maxSearchDurationSeconds: 600,
-      updatedBy: admin.id,
-    },
+    update: {},
     create: {
       serviceType: ServiceType.FUEL,
       offerTimeoutSeconds: 30,
@@ -133,15 +99,7 @@ async function main() {
   // TOWING: 45s timeout, 15km, max 5 offers, shortlist 5, stale 90s, max 600s
   await prisma.dispatchSettings.upsert({
     where: { serviceType: ServiceType.TOWING },
-    update: {
-      offerTimeoutSeconds: 45,
-      searchRadiusKm: 15,
-      maxOffers: 5,
-      candidateShortlistSize: 5,
-      staleLocationSeconds: 90,
-      maxSearchDurationSeconds: 600,
-      updatedBy: admin.id,
-    },
+    update: {},
     create: {
       serviceType: ServiceType.TOWING,
       offerTimeoutSeconds: 45,
@@ -157,15 +115,7 @@ async function main() {
   // LOCKOUT: 30s timeout, 15km, max 5 offers, shortlist 5, stale 90s, max 600s
   await prisma.dispatchSettings.upsert({
     where: { serviceType: ServiceType.LOCKOUT },
-    update: {
-      offerTimeoutSeconds: 30,
-      searchRadiusKm: 15,
-      maxOffers: 5,
-      candidateShortlistSize: 5,
-      staleLocationSeconds: 90,
-      maxSearchDurationSeconds: 600,
-      updatedBy: admin.id,
-    },
+    update: {},
     create: {
       serviceType: ServiceType.LOCKOUT,
       offerTimeoutSeconds: 30,
@@ -183,10 +133,7 @@ async function main() {
   for (const service of [ServiceType.FUEL, ServiceType.TOWING, ServiceType.LOCKOUT]) {
     await prisma.commissionSettings.upsert({
       where: { serviceType: service },
-      update: {
-        commissionBps: 1500,
-        updatedBy: admin.id,
-      },
+      update: {},
       create: {
         serviceType: service,
         commissionBps: 1500,
