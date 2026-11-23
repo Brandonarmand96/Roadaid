@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  BackHandler,
   Image,
   KeyboardAvoidingView,
   Linking,
@@ -21,8 +22,9 @@ import * as Location from "expo-location";
 import { FuelType, LockType, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
 import MapView, { MapViewHandle, Marker, Polyline } from "./MapView";
-import { Bell, Bike, Crosshair, History, LogOut, Phone, Truck, Wrench } from "lucide-react-native";
+import { Bell, Crosshair, History, LogOut, Phone, Truck } from "lucide-react-native";
 import LocationPicker from "./LocationPicker";
+import ServiceIcon from "./ServiceIcon";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
 const rawApi = (
@@ -136,6 +138,14 @@ export default function CustomerExperience({
     {},
   );
   const [, setClock] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== "android" || screen === "home") return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      setScreen(screen === "location" || screen === "quote" ? "details" : "home");
+      return true;
+    });
+    return () => subscription.remove();
+  }, [screen]);
   useEffect(() => {
     if (!token) return;
     const refresh = () =>
@@ -794,9 +804,9 @@ function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, 
             <Text style={s.sheetIntro}>Choose a roadside service. You’ll see the exact price before confirming.</Text>
             {error ? <Notice title="We could not continue" body={error} warning /> : null}
             <View style={s.serviceGrid}>
-              <QuickService service={ServiceType.FUEL} label="Fuel" icon={<Bike color="#191D23" size={25} />} onPress={onService} />
-              <QuickService service={ServiceType.TOWING} label="Towing" icon={<Truck color="#191D23" size={25} />} onPress={onService} />
-              <QuickService service={ServiceType.LOCKOUT} label="Lockout" icon={<Wrench color="#191D23" size={25} />} onPress={onService} />
+              <QuickService service={ServiceType.FUEL} label="Fuel" icon={<ServiceIcon service={ServiceType.FUEL} size={27} />} onPress={onService} />
+              <QuickService service={ServiceType.TOWING} label="Towing" icon={<ServiceIcon service={ServiceType.TOWING} size={27} />} onPress={onService} />
+              <QuickService service={ServiceType.LOCKOUT} label="Lockout" icon={<ServiceIcon service={ServiceType.LOCKOUT} size={27} />} onPress={onService} />
             </View>
             <View style={s.sheetActions}>
               <Pressable accessibilityRole="button" accessibilityLabel="Open request activity" onPress={onHistory} style={s.secondaryAction}><History color="#191D23" size={20} /><Text style={s.secondaryActionText}>Activity</Text></Pressable>
@@ -812,7 +822,7 @@ function CustomerHomeMap({ pickup, busy, error, onLocate, onService, onHistory, 
 }
 
 function QuickService({ service, label, icon, onPress }: { service: ServiceType; label: string; icon: React.ReactNode; onPress: (service: ServiceType) => void }) {
-  return <Pressable accessibilityRole="button" onPress={() => onPress(service)} style={s.quickService}><View style={s.quickServiceIcon}>{icon}</View><Text style={s.quickServiceLabel}>{label}</Text></Pressable>;
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${label} assistance`} accessibilityHint={`Start a ${label.toLowerCase()} request`} onPress={() => onPress(service)} style={s.quickService}><View style={s.quickServiceIcon}>{icon}</View><Text style={s.quickServiceLabel}>{label}</Text></Pressable>;
 }
 
 function CustomerActiveMap({ request, position, ageSeconds, busy, error, paymentDue, paymentChecking, token, apiRequest, onPay, onCancel, onHistory, onSignOut, onProviderMode }: {
@@ -897,16 +907,16 @@ function servicePresentation(serviceType: string) {
   if (serviceType === ServiceType.FUEL)
     return {
       role: "Your dispatch rider",
-      icon: <Bike color="#191D23" size={28} strokeWidth={2.2} />,
+      icon: <ServiceIcon service={ServiceType.FUEL} />,
     };
   if (serviceType === ServiceType.TOWING)
     return {
       role: "Your tow operator",
-      icon: <Truck color="#191D23" size={28} strokeWidth={2.2} />,
+      icon: <ServiceIcon service={ServiceType.TOWING} />,
     };
   return {
     role: "Your roadside technician",
-    icon: <Wrench color="#191D23" size={28} strokeWidth={2.2} />,
+    icon: <ServiceIcon service={ServiceType.LOCKOUT} />,
   };
 }
 
@@ -1079,7 +1089,7 @@ function Field({
   return (
     <View style={s.field}>
       <Text style={s.label}>{label}</Text>
-      <TextInput {...props} style={s.input} placeholderTextColor="#778196" />
+      <TextInput {...props} accessibilityLabel={props.accessibilityLabel ?? label} style={s.input} placeholderTextColor="#778196" />
     </View>
   );
 }
@@ -1096,6 +1106,9 @@ function Button({
 }) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(busy || disabled), busy: Boolean(busy) }}
       onPress={onPress}
       disabled={busy || disabled}
       style={[s.button, (busy || disabled) && s.disabled]}
@@ -1117,7 +1130,7 @@ function SecondaryButton({ label, onPress }: { label: string; onPress: () => voi
 }
 function Link({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={s.link}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={s.link}>
       <Text style={s.linkText}>{label}</Text>
     </Pressable>
   );
@@ -1136,6 +1149,9 @@ function Choices({
       {values.map((item) => (
         <Pressable
           key={item}
+          accessibilityRole="radio"
+          accessibilityLabel={item.replaceAll("_", " ")}
+          accessibilityState={{ selected: item === value }}
           onPress={() => onChange(item)}
           style={[s.choice, item === value && s.choiceActive]}
         >
