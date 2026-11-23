@@ -1308,7 +1308,7 @@ function Field({
   return (
     <View style={s.field}>
       <Text style={s.label}>{label}</Text>
-      <TextInput {...props} style={s.input} placeholderTextColor="#718096" />
+      <TextInput {...props} accessibilityLabel={props.accessibilityLabel ?? label} style={s.input} placeholderTextColor="#718096" />
     </View>
   );
 }
@@ -1326,6 +1326,8 @@ function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(busy || disabled), busy: Boolean(busy) }}
       onPress={onPress}
       disabled={busy || disabled}
       style={[s.button, (busy || disabled) && s.disabled]}
@@ -1340,7 +1342,7 @@ function Button({
 }
 function Link({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={s.link}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={s.link}>
       <Text style={s.linkText}>{label}</Text>
     </Pressable>
   );
@@ -1357,7 +1359,7 @@ function Choice({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={[s.choice, selected && s.selected]}>
+    <Pressable accessibilityRole="checkbox" accessibilityLabel={label} accessibilityState={{ checked: selected }} onPress={onPress} style={[s.choice, selected && s.selected]}>
       <View style={[s.box, selected && s.checked]}>
         <Text style={s.tick}>{selected ? "✓" : ""}</Text>
       </View>
