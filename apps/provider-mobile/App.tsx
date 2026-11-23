@@ -24,8 +24,9 @@ import * as TaskManager from "expo-task-manager";
 import { OnboardingStatus, Role, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
 import MapView, { Marker, Polyline } from "react-native-maps";
-import { Clock3, Crosshair, Navigation, Power, UserRound } from "lucide-react-native";
+import { Check, ChevronRight, Clock3, Crosshair, FileCheck2, Navigation, Power, ShieldCheck, UploadCloud, UserRound } from "lucide-react-native";
 import CustomerExperience from "./CustomerExperience";
+import ServiceIcon from "./ServiceIcon";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_EAS_PROJECT_ID?: string } };
 
@@ -788,10 +789,8 @@ export default function App() {
         ) : null}
         {position > 0 && (
           <View style={s.progress}>
-            <Text style={s.muted}>Application step {position} of 4</Text>
-            <View style={s.track}>
-              <View style={[s.fill, { width: `${position * 25}%` }]} />
-            </View>
+            <View style={s.progressHeading}><Text style={s.progressTitle}>Provider verification</Text><Text style={s.progressCount}>{position} / 4</Text></View>
+            <View style={s.progressSegments}>{sequence.map((item, index) => <View key={item} style={[s.progressSegment, index < position && s.progressSegmentActive]} />)}</View>
           </View>
         )}
         {error ? (
@@ -1360,15 +1359,14 @@ function Choice({
 }) {
   return (
     <Pressable accessibilityRole="checkbox" accessibilityLabel={label} accessibilityState={{ checked: selected }} onPress={onPress} style={[s.choice, selected && s.selected]}>
-      <View style={[s.box, selected && s.checked]}>
-        <Text style={s.tick}>{selected ? "✓" : ""}</Text>
-      </View>
-      <View>
+      <View style={[s.choiceIcon, selected && s.choiceIconSelected]}>{Object.values(ServiceType).includes(label as ServiceType) ? <ServiceIcon service={label as ServiceType} size={25} /> : label === "Customer" ? <UserRound color="#191D23" size={24} /> : <ShieldCheck color="#191D23" size={24} />}</View>
+      <View style={s.choiceCopy}>
         <Text style={s.choiceTitle}>
           {label[0] + label.slice(1).toLowerCase()}
         </Text>
         <Text style={s.muted}>{detail ?? "Apply for separate Operations approval"}</Text>
       </View>
+      <View style={[s.box, selected && s.checked]}>{selected ? <Check color="#FFFFFF" size={16} strokeWidth={3} /> : <ChevronRight color="#8993A4" size={18} />}</View>
     </Pressable>
   );
 }
@@ -1383,6 +1381,7 @@ function Upload({
 }) {
   return (
     <View style={s.upload}>
+      <View style={[s.uploadIcon, present && s.uploadIconReady]}>{present ? <FileCheck2 color="#218A52" size={23} /> : <UploadCloud color="#83520F" size={23} />}</View>
       <View style={s.flex}>
         <Text style={s.choiceTitle}>{label}</Text>
         <Text style={s.muted}>
@@ -1453,7 +1452,7 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#191D23" },
   content: { flex: 1 },
   header: {
-    height: 80,
+    height: 72,
     paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
@@ -1472,10 +1471,10 @@ const s = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 1.4,
   },
-  page: { flexGrow: 1, backgroundColor: "#F6F7F5", paddingHorizontal: 20, paddingTop: 20, paddingBottom: 56 },
+  page: { flexGrow: 1, backgroundColor: "#F6F7F5", paddingHorizontal: 20, paddingTop: 16, paddingBottom: 56 },
   screen: {
     flex: 1,
-    justifyContent: "center",
+    justifyContent: "flex-start",
     maxWidth: 620,
     width: "100%",
     alignSelf: "center",
@@ -1488,21 +1487,22 @@ const s = StyleSheet.create({
     letterSpacing: -0.7,
   },
   intro: { color: "#566277", fontSize: 16, lineHeight: 23, marginTop: 10 },
-  form: { marginTop: 25, gap: 16 },
+  form: { marginTop: 24, gap: 14 },
   progress: {
     maxWidth: 620,
     width: "100%",
     alignSelf: "center",
-    marginBottom: 24,
+    marginBottom: 22,
+    padding: 15,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
   },
-  track: {
-    height: 5,
-    backgroundColor: "#D8D2C5",
-    borderRadius: 4,
-    overflow: "hidden",
-    marginTop: 8,
-  },
-  fill: { height: 5, backgroundColor: "#C97821" },
+  progressHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  progressTitle: { color: "#191D23", fontSize: 13, fontWeight: "900" },
+  progressCount: { color: "#70460D", fontSize: 12, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  progressSegments: { flexDirection: "row", gap: 6, marginTop: 11 },
+  progressSegment: { flex: 1, height: 5, borderRadius: 3, backgroundColor: "#E2E5E0" },
+  progressSegmentActive: { backgroundColor: "#D38A1C" },
   field: { gap: 7 },
   label: { color: "#263247", fontSize: 13, fontWeight: "800" },
   input: {
@@ -1539,13 +1539,16 @@ const s = StyleSheet.create({
     flexDirection: "row",
     gap: 13,
     alignItems: "center",
-    padding: 16,
+    padding: 13,
     borderWidth: 1,
     borderColor: "#C8C1B4",
     borderRadius: 14,
     backgroundColor: "#FFFFFF",
   },
   selected: { borderColor: "#D38A1C", backgroundColor: "#FFF0CC" },
+  choiceIcon: { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#F0F2EE" },
+  choiceIconSelected: { backgroundColor: "#F4AE3E" },
+  choiceCopy: { flex: 1, minWidth: 0 },
   box: {
     width: 24,
     height: 24,
@@ -1556,17 +1559,20 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   checked: { backgroundColor: "#D38A1C", borderColor: "#D38A1C" },
-  tick: { color: "#FFFFFF", fontWeight: "900" },
   choiceTitle: { color: "#191D23", fontWeight: "900", fontSize: 15 },
   muted: { color: "#6B7280", fontSize: 12, lineHeight: 18 },
   upload: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#D8D2C5",
+    padding: 13,
+    borderWidth: 1,
+    borderColor: "#D8D2C5",
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
   },
+  uploadIcon: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0CC" },
+  uploadIconReady: { backgroundColor: "#E3F1E8" },
   outline: {
     minHeight: 40,
     paddingHorizontal: 14,

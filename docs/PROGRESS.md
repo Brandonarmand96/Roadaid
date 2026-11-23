@@ -1,5 +1,12 @@
 # ROADAID — BUILD PROGRESS TRACKER
 
+## Master parity without mapping-provider changes — 23 Nov 2026
+
+- Promoted the test branch's mobile accessibility, service icon, EAS/shared-package compatibility, deployment packaging and bootstrap-admin reliability fixes to `master`.
+- Added the unified customer/provider visual refinements for role selection, provider verification, service details, price review, active-request identity and request history.
+- Intentionally retained master's existing Google Maps implementation. The test branch's MapLibre/Mapbox provider, custom map wrapper and provider-map changes were not promoted.
+- Verification: workspace lint and typecheck PASS; API regression suite PASS (98/98); Android production bundle export PASS (2,996 modules).
+
 ## Phase 0: Foundation (COMPLETED)
 **Status:** Gate Passed / Ready for Phase 1  
 **Date:** 13 Nov 2026 (Timeline baseline: 9–11 Nov 2026)
@@ -653,3 +660,11 @@ Phase 3 dispatch is now authorized.
 - Commission-sensitive targeted suites: PASS (41/41 across dispatch, provider availability, request state, payments and wallet).
 - API and admin production builds: PASS.
 - Physical push delivery, 24-hour reminder deduplication and at-limit device behavior remain listed acceptance evidence in `docs/DEVICE_TESTS.md`.
+
+### Unified mobile experience refinement — 23 Nov 2026
+
+- Extended the map-first RoadAid direction across customer and provider flows using the interaction patterns common to mature ride-hailing apps: a single dominant action, progressive disclosure, high-contrast status, and compact supporting actions.
+- Refined provider registration with service-specific capability icons, clear role selection, segmented verification progress and explicit document upload/verified states.
+- Refined customer service details and price review with service identity carried between screens, and converted request history into scannable service cards with status, payment and live-tracking context.
+- Kept RoadAid's charcoal, warm-white and amber identity; no competitor branding or out-of-scope services were introduced.
+- Verification: workspace lint and typecheck PASS; API regression suite PASS (99/99); Android production bundle export PASS (3,034 modules). Device visual acceptance remains required on the fresh EAS build because native map rendering cannot be validated in the TypeScript toolchain.

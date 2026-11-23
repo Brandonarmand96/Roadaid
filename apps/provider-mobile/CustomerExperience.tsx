@@ -22,7 +22,7 @@ import * as Location from "expo-location";
 import { FuelType, LockType, ServiceType } from "@roadaid/shared";
 import { io } from "socket.io-client";
 import MapView, { Marker, Polyline } from "react-native-maps";
-import { Bell, Crosshair, History, LogOut, Phone, Truck } from "lucide-react-native";
+import { Bell, Crosshair, History, LogOut, Phone, Share2, Star, Truck } from "lucide-react-native";
 import LocationPicker from "./LocationPicker";
 import ServiceIcon from "./ServiceIcon";
 
@@ -424,6 +424,7 @@ export default function CustomerExperience({
         onPay={() => void pay(activeRequest.id)}
         onCancel={() => void cancel(activeRequest.id)}
         onHistory={() => setScreen("history")}
+        onShare={activeRequest.shareToken ? () => void shareRequest(activeRequest) : undefined}
         onSignOut={onSignOut}
         onProviderMode={onProviderMode}
       />
@@ -474,6 +475,7 @@ export default function CustomerExperience({
                   : "Lockout details"
             }
             intro="Tell Operations exactly what the responder should prepare for."
+            icon={<ServiceIcon service={service} size={30} />}
           >
             {service === ServiceType.FUEL && (
               <>
@@ -582,6 +584,7 @@ export default function CustomerExperience({
           <Section
             title="Review before requesting"
             intro="This price is calculated by RoadAid and will be locked when you confirm."
+            icon={<ServiceIcon service={service} size={30} />}
           >
             <Summary label="Service" value={service} />
             <Summary label="Pickup" value={pickup.address} />
@@ -638,12 +641,9 @@ export default function CustomerExperience({
                 return (
                   <View key={item.id} style={s.history}>
                     <View style={s.between}>
-                      <Text style={s.historyCode}>{item.code}</Text>
+                      <View style={s.historyIdentity}><View style={s.historyIcon}><ServiceIcon service={item.serviceType as ServiceType} size={22} /></View><View><Text style={s.historyCode}>{item.code}</Text><Text style={s.historyService}>{item.serviceType} · {money(item.priceKobo)}</Text></View></View>
                       <Text style={s.status}>{item.status}</Text>
                     </View>
-                    <Text style={s.historyService}>
-                      {item.serviceType} · {money(item.priceKobo)}
-                    </Text>
                     <Text style={s.muted}>{item.pickupAddress}</Text>
                     <Text style={s.muted}>Payment: {item.paymentStatus}</Text>
                     {item.scheduledFor ? <Text style={s.muted}>Scheduled: {new Date(item.scheduledFor).toLocaleString("en-NG")}</Text> : null}
@@ -825,10 +825,10 @@ function QuickService({ service, label, icon, onPress }: { service: ServiceType;
   return <Pressable accessibilityRole="button" accessibilityLabel={`${label} assistance`} accessibilityHint={`Start a ${label.toLowerCase()} request`} onPress={() => onPress(service)} style={s.quickService}><View style={s.quickServiceIcon}>{icon}</View><Text style={s.quickServiceLabel}>{label}</Text></Pressable>;
 }
 
-function CustomerActiveMap({ request, position, ageSeconds, busy, error, paymentDue, paymentChecking, token, apiRequest, onPay, onCancel, onHistory, onSignOut, onProviderMode }: {
+function CustomerActiveMap({ request, position, ageSeconds, busy, error, paymentDue, paymentChecking, token, apiRequest, onPay, onCancel, onHistory, onShare, onSignOut, onProviderMode }: {
   request: RoadRequest; position?: ProviderPosition; ageSeconds: number | null; busy: boolean; error: string; paymentDue: boolean; paymentChecking: boolean;
   token: string; apiRequest: <T>(path: string, options?: RequestInit, token?: string) => Promise<T>;
-  onPay: () => void; onCancel: () => void; onHistory: () => void; onSignOut: () => void; onProviderMode?: () => void;
+  onPay: () => void; onCancel: () => void; onHistory: () => void; onShare?: () => void; onSignOut: () => void; onProviderMode?: () => void;
 }) {
   const mapRef = useRef<MapView>(null);
   const [route, setRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
@@ -868,22 +868,33 @@ function CustomerActiveMap({ request, position, ageSeconds, busy, error, payment
           {route.length > 1 ? <Polyline coordinates={route} strokeColor="#D38A1C" strokeWidth={5} /> : null}
         </MapView>
         <SafeAreaView style={s.mapChrome} edges={["top", "right", "left"]} pointerEvents="box-none">
-          <View style={s.floatingBar}><View style={s.tripCode}><Text style={s.tripCodeLabel}>{request.serviceType}</Text><Text style={s.tripCodeValue}>{request.code}</Text></View><Pressable accessibilityRole="button" onPress={onHistory} style={s.roundAction}><History color="#191D23" size={22} /></Pressable></View>
+          <View style={s.floatingBar}>
+            <View style={s.activeBrandBar}>
+              <Image source={require("./assets/roadaid-mark.png")} style={s.compactLogo} resizeMode="contain" />
+              <View style={s.activeBrandCopy}><Text style={s.compactBrandName}>RoadAid</Text><Text style={s.activeTripMeta}>{request.serviceType} · {request.code}</Text></View>
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Open request activity" onPress={onHistory} style={s.roundAction}><History color="#191D23" size={22} /></Pressable>
+          </View>
         </SafeAreaView>
         <SafeAreaView style={s.bottomSafe} edges={["bottom"]} pointerEvents="box-none">
           <View style={s.rideSheet}>
             <View style={s.sheetHandle} />
             <ScrollView style={s.sheetScroller} contentContainerStyle={s.sheetScrollContent} showsVerticalScrollIndicator={false}>
-            <View style={s.activeHeading}><View style={s.activeCopy}><Text style={s.sheetTitle}>{headline}</Text><Text style={s.sheetIntro}>{request.etaSeconds ? `${Math.max(1, Math.ceil(request.etaSeconds / 60))} min estimated arrival` : request.pickupAddress}</Text></View><View style={s.quickServiceIcon}>{presentation.icon}</View></View>
+            <View style={s.activeHeading}><View style={s.activeCopy}><Text style={s.sheetTitle}>{headline}</Text><Text style={s.sheetIntro}>{request.etaSeconds ? "Estimated arrival" : request.pickupAddress}</Text></View>{request.etaSeconds ? <View style={s.etaBadge}><Text style={s.etaValue}>{Math.max(1, Math.ceil(request.etaSeconds / 60))}</Text><Text style={s.etaUnit}>MIN</Text></View> : <View style={s.quickServiceIcon}>{presentation.icon}</View>}</View>
             <View style={[s.liveStrip, (stale || disconnected) && s.liveStripWarning]}><View style={[s.liveDot, (stale || disconnected) && s.liveDotWarning]} /><Text style={s.liveText}>{disconnected ? "Location connection lost" : stale ? "Location update delayed" : provider ? "Responder location is live" : "Waiting for responder location"}</Text></View>
             {dispatchMessage ? <Text accessibilityLiveRegion="polite" style={s.sheetIntro}>{dispatchMessage}</Text> : null}
-            {request.provider ? <View style={s.responderCompact}><View><Text style={s.responderName}>{request.provider.fullName ?? "Verified RoadAid responder"}</Text><Text style={s.responderRole}>{presentation.role}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Call responder" onPress={() => void Linking.openURL(`tel:${request.provider?.phone}`)} style={s.callButton}><Phone color="#191D23" size={21} /></Pressable></View> : null}
-            {request.provider?.providerProfile ? <><Summary label="Verified jobs" value={String(request.provider.providerProfile.completedJobs)} /><Summary label="Rating" value={`${Number(request.provider.providerProfile.ratingAvg ?? 0).toFixed(1)} (${request.provider.providerProfile.ratingCount})`} />{request.provider.providerProfile.vehiclePlate ? <Summary label="Service vehicle" value={`${request.provider.providerProfile.vehicleMake ?? ""} ${request.provider.providerProfile.vehicleModel ?? ""} · ${request.provider.providerProfile.vehiclePlate}`.trim()} /> : null}</> : null}
+            {request.provider ? <View style={s.responderCard}>
+              {request.provider.avatarUrl ? <Image source={{ uri: request.provider.avatarUrl }} style={s.responderPhoto} /> : <View style={s.responderFallback}>{presentation.icon}</View>}
+              <View style={s.responderCardCopy}><Text style={s.responderName} numberOfLines={1}>{request.provider.fullName ?? "Verified RoadAid responder"}</Text><Text style={s.responderRole}>{presentation.role}</Text>{request.provider.providerProfile ? <View style={s.ratingRow}><Star color="#D38A1C" fill="#F4AE3E" size={15} /><Text style={s.ratingText}>{Number(request.provider.providerProfile.ratingAvg ?? 0).toFixed(1)} · {request.provider.providerProfile.completedJobs} verified jobs</Text></View> : null}</View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Call responder" onPress={() => void Linking.openURL(`tel:${request.provider?.phone}`)} style={s.callButton}><Phone color="#191D23" size={21} /></Pressable>
+            </View> : null}
+            {request.provider?.providerProfile?.vehiclePlate ? <View style={s.vehicleRow}><View style={s.vehicleIcon}>{presentation.icon}</View><View style={s.vehicleCopy}><Text style={s.vehicleLabel}>SERVICE VEHICLE</Text><Text style={s.vehicleValue}>{`${request.provider.providerProfile.vehicleMake ?? ""} ${request.provider.providerProfile.vehicleModel ?? ""}`.trim() || presentation.role}</Text><Text style={s.vehiclePlate}>{request.provider.providerProfile.vehiclePlate}</Text></View></View> : null}
             {request.pickupPin && ["ASSIGNED", "EN_ROUTE"].includes(request.status) ? <Notice title={`Pickup PIN: ${request.pickupPin}`} body="Give this PIN only to the verified responder after checking their identity and service vehicle." /> : null}
             {error ? <Notice title="Update failed" body={error} warning /> : null}
             {request.paymentMode === "CASH" && request.paymentStatus !== "PAID" ? <Notice title={`Cash payment: ${money(request.priceKobo)}`} body="Pay the exact total directly to your verified responder after they arrive. Ask them to confirm receipt in RoadAid." /> : null}
             {paymentChecking ? <Notice title="Confirming payment" body="We are checking Paystack. Do not pay again or close RoadAid." /> : null}
             {paymentDue && !paymentChecking ? <Button label={`Pay ${money(request.priceKobo)}`} onPress={onPay} busy={busy} /> : null}
+            {onShare ? <Pressable accessibilityRole="button" accessibilityLabel="Share live request status" onPress={onShare} style={s.shareButton}><Share2 color="#F4AE3E" size={21} /><Text style={s.shareButtonText}>Share live request status</Text></Pressable> : null}
             {["REQUESTED", "SEARCHING", "ESCALATED", "ASSIGNED", "EN_ROUTE"].includes(request.status) ? <Link label="Cancel request" onPress={onCancel} /> : null}
             <View style={s.sheetActions}>{onProviderMode ? <Pressable accessibilityRole="button" accessibilityLabel="Switch to Provider mode" onPress={onProviderMode} style={s.secondaryAction}><Truck color="#191D23" size={20} /><Text style={s.secondaryActionText}>Provider mode</Text></Pressable> : null}<Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => confirmSignOut(onSignOut)} style={s.secondaryAction}><LogOut color="#191D23" size={20} /><Text style={s.secondaryActionText}>Sign out</Text></Pressable></View>
             </ScrollView>
@@ -1072,12 +1083,12 @@ function Header({ onPress }: { onPress?: () => void }) {
 function Section({
   title,
   intro,
+  icon,
   children,
-}: React.PropsWithChildren<{ title: string; intro: string }>) {
+}: React.PropsWithChildren<{ title: string; intro: string; icon?: React.ReactNode }>) {
   return (
     <View style={s.section}>
-      <Text style={s.title}>{title}</Text>
-      <Text style={s.intro}>{intro}</Text>
+      <View style={s.sectionHeading}>{icon ? <View style={s.sectionIcon}>{icon}</View> : null}<View style={s.sectionCopy}><Text style={s.title}>{title}</Text><Text style={s.intro}>{intro}</Text></View></View>
       <View style={s.form}>{children}</View>
     </View>
   );
@@ -1195,6 +1206,9 @@ const s = StyleSheet.create({
   compactLogo: { width: 36, height: 36 },
   compactBrandName: { color: "#FFFFFF", fontSize: 16, lineHeight: 18, fontWeight: "900" },
   compactTagline: { color: "#F4AE3E", fontSize: 7, lineHeight: 10, fontWeight: "900", letterSpacing: 1.1 },
+  activeBrandBar: { minHeight: 54, flex: 1, maxWidth: 280, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: "#191D23", borderRadius: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.18, shadowRadius: 12, elevation: 6 },
+  activeBrandCopy: { flex: 1, minWidth: 0 },
+  activeTripMeta: { color: "#F4AE3E", fontSize: 10, lineHeight: 14, fontWeight: "900", letterSpacing: 0.45 },
   roundAction: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.16, shadowRadius: 10, elevation: 5 },
   locateFab: { position: "absolute", right: 18, bottom: 330, width: 52, height: 52, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.17, shadowRadius: 10, elevation: 5 },
   bottomSafe: { position: "absolute", left: 0, right: 0, bottom: 0 },
@@ -1217,15 +1231,32 @@ const s = StyleSheet.create({
   tripCodeValue: { color: "#FFFFFF", fontSize: 15, fontWeight: "900", marginTop: 2 },
   activeHeading: { flexDirection: "row", alignItems: "center", gap: 14 },
   activeCopy: { flex: 1, minWidth: 0 },
+  etaBadge: { minWidth: 72, height: 58, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#F4AE3E" },
+  etaValue: { color: "#191D23", fontSize: 24, lineHeight: 25, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  etaUnit: { color: "#70460D", fontSize: 9, fontWeight: "900", letterSpacing: 1 },
   liveStrip: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 12, borderRadius: 12, backgroundColor: "#E3F1E8", marginTop: 15 },
   liveStripWarning: { backgroundColor: "#FFF0CC" },
   liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: "#218A52" },
   liveDotWarning: { backgroundColor: "#C97821" },
   liveText: { color: "#263247", fontSize: 13, fontWeight: "800" },
   responderCompact: { minHeight: 62, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 9 },
+  responderCard: { minHeight: 88, flexDirection: "row", alignItems: "center", gap: 12, marginTop: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#E4DED3" },
+  responderPhoto: { width: 58, height: 58, borderRadius: 18, backgroundColor: "#ECEFEA" },
+  responderFallback: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0CC" },
+  responderCardCopy: { flex: 1, minWidth: 0 },
+  ratingRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 },
+  ratingText: { color: "#4F5964", fontSize: 12, fontWeight: "700" },
+  vehicleRow: { minHeight: 78, flexDirection: "row", alignItems: "center", gap: 13, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#E4DED3" },
+  vehicleIcon: { width: 54, height: 54, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0CC" },
+  vehicleCopy: { flex: 1, minWidth: 0 },
+  vehicleLabel: { color: "#83520F", fontSize: 9, fontWeight: "900", letterSpacing: 0.9 },
+  vehicleValue: { color: "#191D23", fontSize: 15, fontWeight: "900", marginTop: 3 },
+  vehiclePlate: { color: "#4F5964", fontSize: 13, fontWeight: "800", marginTop: 2 },
+  shareButton: { minHeight: 52, marginTop: 14, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9, backgroundColor: "#191D23", paddingHorizontal: 16 },
+  shareButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900" },
   safe: { flex: 1, backgroundColor: "#191D23" },
   header: {
-    height: 80,
+    height: 72,
     paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
@@ -1241,14 +1272,17 @@ const s = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 1.4,
   },
-  page: { flexGrow: 1, backgroundColor: "#F6F7F5", padding: 20 },
+  page: { flexGrow: 1, backgroundColor: "#F6F7F5", paddingHorizontal: 20, paddingTop: 16, paddingBottom: 48 },
   section: {
     flex: 1,
     width: "100%",
     maxWidth: 620,
     alignSelf: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
   },
+  sectionHeading: { flexDirection: "row", alignItems: "center", gap: 14 },
+  sectionIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#F4AE3E" },
+  sectionCopy: { flex: 1, minWidth: 0 },
   title: {
     color: "#191D23",
     fontSize: 31,
@@ -1357,11 +1391,15 @@ const s = StyleSheet.create({
   noticeTitle: { color: "#191D23", fontWeight: "900" },
   noticeBody: { color: "#4F5964", marginTop: 5, lineHeight: 19 },
   history: {
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#DDE0DB",
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#DDE0DB",
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
   },
   between: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  historyIdentity: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 11 },
+  historyIcon: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0CC" },
   historyCode: { color: "#191D23", fontWeight: "900" },
   status: {
     color: "#70460D",
@@ -1375,8 +1413,7 @@ const s = StyleSheet.create({
   historyService: {
     color: "#191D23",
     fontWeight: "800",
-    marginTop: 8,
-    marginBottom: 3,
+    marginTop: 3,
   },
   tracking: {
     marginTop: 16,
