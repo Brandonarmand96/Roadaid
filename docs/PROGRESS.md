@@ -1,5 +1,12 @@
 # ROADAID — BUILD PROGRESS TRACKER
 
+## Master/test feature parity audit — 26 Nov 2026
+
+- Reconciled the customer and provider mobile experience so both branches expose the same registration, onboarding, request, tracking, trust, payment, history and account capabilities.
+- Promoted hosted CORS behavior, Supabase private-document storage support and admin container packaging to `master` so non-map operational capabilities match `test`.
+- Preserved the intentional map-provider split: `master` uses Google Maps/react-native-maps while `test` uses Mapbox/MapLibre. Provider-specific map adapters, dependencies, keys, route/geocoding implementations and map rendering remain branch-specific.
+- Verification: workspace lint and typecheck PASS; master API regression suite PASS (98/98); master Android production bundle export PASS (2,996 modules). Test mobile lint/typecheck PASS before its parity commit.
+
 ## Master parity without mapping-provider changes — 23 Nov 2026
 
 - Promoted the test branch's mobile accessibility, service icon, EAS/shared-package compatibility, deployment packaging and bootstrap-admin reliability fixes to `master`.
