@@ -1,11 +1,11 @@
 import { RealtimeGateway } from '../src/realtime/realtime.gateway';
 
 describe('RealtimeGateway request room authorization', () => {
-  const prisma: any = { serviceRequest: { findFirst: jest.fn() } };
+  const prisma: any = { serviceRequest: { findFirst: jest.fn() }, $queryRaw: jest.fn().mockResolvedValue([]) };
   const gateway = new RealtimeGateway(prisma);
-  const client: any = { data: { user: { userId: 'customer-1', role: 'CUSTOMER' } }, join: jest.fn(), leave: jest.fn(), id: 'socket-1' };
+  const client: any = { data: { user: { userId: 'customer-1', role: 'CUSTOMER' } }, join: jest.fn(), leave: jest.fn(), emit: jest.fn(), id: 'socket-1' };
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => { jest.clearAllMocks(); prisma.$queryRaw.mockResolvedValue([]); });
 
   it('allows a customer to join their own request room', async () => {
     prisma.serviceRequest.findFirst.mockResolvedValue({ id: 'request-1' });
@@ -18,6 +18,15 @@ describe('RealtimeGateway request room authorization', () => {
     prisma.serviceRequest.findFirst.mockResolvedValue(null);
     await expect(gateway.handleJoinRequest(client, { requestId: 'request-2' })).resolves.toEqual({ success: false, error: 'Forbidden request room' });
     expect(client.join).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('sends the latest stored provider position immediately after a reconnect', async () => {
+    const snapshot = { requestId: 'request-1', providerId: 'provider-1', lat: 9.1, lng: 7.2, accuracy: 12, heading: null, speed: null, recordedAt: new Date(), receivedAt: new Date() };
+    prisma.serviceRequest.findFirst.mockResolvedValue({ id: 'request-1' });
+    prisma.$queryRaw.mockResolvedValue([snapshot]);
+    await gateway.handleJoinRequest(client, { requestId: 'request-1' });
+    expect(client.emit).toHaveBeenCalledWith('provider.location', snapshot);
   });
 
   it('allows a provider to join a request they created in Customer mode', async () => {

@@ -373,8 +373,8 @@ export class ProvidersService {
     if (recordedAt.getTime() > now + 60_000 || recordedAt.getTime() < now - 5 * 60_000) {
       throw new BadRequestException({ code: 'INVALID_LOCATION_TIME', message: 'Location timestamp is outside the accepted range' });
     }
-    await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`
+    const latestAccepted = await this.prisma.$transaction(async (tx) => {
+      const accepted = await tx.$queryRaw<Array<{ recorded_at: Date }>>`
         INSERT INTO provider_locations
           (provider_id, location, heading, speed_mps, accuracy_m, recorded_at, received_at, created_at, updated_at)
         VALUES
@@ -382,7 +382,9 @@ export class ProvidersService {
            ${dto.heading ?? null}, ${dto.speed ?? null}, ${dto.accuracy}, ${recordedAt}, now(), now(), now())
         ON CONFLICT (provider_id) DO UPDATE SET
           location=EXCLUDED.location, heading=EXCLUDED.heading, speed_mps=EXCLUDED.speed_mps,
-          accuracy_m=EXCLUDED.accuracy_m, recorded_at=EXCLUDED.recorded_at, received_at=now(), updated_at=now()`;
+          accuracy_m=EXCLUDED.accuracy_m, recorded_at=EXCLUDED.recorded_at, received_at=now(), updated_at=now()
+        WHERE provider_locations.recorded_at <= EXCLUDED.recorded_at
+        RETURNING recorded_at`;
       if (profile.currentRequestId) {
         await tx.$executeRaw`
           INSERT INTO provider_location_history
@@ -390,36 +392,74 @@ export class ProvidersService {
           VALUES
             (gen_random_uuid(), ${providerId}::uuid, ${profile.currentRequestId}::uuid,
              ST_SetSRID(ST_MakePoint(${dto.lng}, ${dto.lat}), 4326)::geography,
-             ${dto.accuracy}, ${recordedAt}, now())`;
+             ${dto.accuracy}, ${recordedAt}, now())
+          ON CONFLICT (provider_id, recorded_at) DO NOTHING`;
       }
+      return accepted.length === 1;
     });
     const receivedAt = new Date().toISOString();
-    if (profile.currentRequestId && emitRealtime) {
-      this.realtimeGateway.emitProviderLocation(profile.currentRequestId, { requestId: profile.currentRequestId, providerId, ...dto, receivedAt });
-      if (now - (this.lastEtaRefresh.get(profile.currentRequestId) || 0) >= 30_000) {
-        const [distance] = await this.prisma.$queryRaw<Array<{ distance_m: number }>>`
-          SELECT ST_Distance(pickup_location, ST_SetSRID(ST_MakePoint(${dto.lng}, ${dto.lat}), 4326)::geography)::float AS distance_m
-          FROM service_requests WHERE id=${profile.currentRequestId}::uuid AND status='EN_ROUTE'`;
-        if (distance) {
-          const etaSeconds = Math.max(60, Math.round(distance.distance_m / 8.3));
-          await this.prisma.serviceRequest.update({ where: { id: profile.currentRequestId }, data: { etaSeconds } });
-          this.realtimeGateway.emitRequestEta(profile.currentRequestId, etaSeconds);
-          this.lastEtaRefresh.set(profile.currentRequestId, now);
-        }
-      }
-    }
-    return { success: true, receivedAt, warning: dto.accuracy > 200 ? 'LOW_ACCURACY' : undefined };
+    if (latestAccepted && profile.currentRequestId && emitRealtime) await this.publishLocation(providerId, profile.currentRequestId, dto, receivedAt);
+    return { success: true, accepted: latestAccepted, receivedAt, warning: dto.accuracy > 200 ? 'LOW_ACCURACY' : undefined };
   }
 
   async updateLocationBatch(providerId: string, points: LocationUpdateDto[]) {
     if (!Array.isArray(points) || points.length === 0 || points.length > 200) throw new BadRequestException({ code: 'INVALID_LOCATION_BATCH', message: 'Location batch must contain between 1 and 200 points' });
-    const ordered = [...points].sort((a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime());
-    for (const [index, point] of ordered.entries()) {
+    const deduplicated = new Map<string, LocationUpdateDto>();
+    for (const point of points) {
       const parsed = locationUpdateSchema.safeParse(point);
       if (!parsed.success) throw new BadRequestException({ code: 'INVALID_LOCATION_POINT', message: 'Location batch contains an invalid point' });
-      await this.updateLocation(providerId, parsed.data, index === ordered.length - 1);
+      const recordedAt = new Date(parsed.data.recordedAt);
+      const now = Date.now();
+      if (recordedAt.getTime() > now + 60_000 || recordedAt.getTime() < now - 5 * 60_000) throw new BadRequestException({ code: 'INVALID_LOCATION_TIME', message: 'Location timestamp is outside the accepted range' });
+      deduplicated.set(parsed.data.recordedAt, parsed.data);
     }
-    return { success: true, accepted: ordered.length };
+    const ordered = [...deduplicated.values()].sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
+    const profile = await this.prisma.providerProfile.findUnique({ where: { userId: providerId } });
+    if (!profile) throw new NotFoundException({ code: 'PROVIDER_PROFILE_NOT_FOUND', message: 'Provider profile not found' });
+    const newest = ordered[ordered.length - 1];
+    const payload = JSON.stringify(ordered.map((point) => ({ ...point, recorded_at: point.recordedAt })));
+    const latestAccepted = await this.prisma.$transaction(async (tx) => {
+      if (profile.currentRequestId) {
+        await tx.$executeRaw`
+          INSERT INTO provider_location_history (id, provider_id, request_id, location, accuracy_m, recorded_at, created_at)
+          SELECT gen_random_uuid(), ${providerId}::uuid, ${profile.currentRequestId}::uuid,
+            ST_SetSRID(ST_MakePoint(point.lng, point.lat), 4326)::geography,
+            point.accuracy, point.recorded_at, now()
+          FROM jsonb_to_recordset(${payload}::jsonb)
+            AS point(lat double precision, lng double precision, accuracy double precision, recorded_at timestamptz)
+          ON CONFLICT (provider_id, recorded_at) DO NOTHING`;
+      }
+      const accepted = await tx.$queryRaw<Array<{ recorded_at: Date }>>`
+        INSERT INTO provider_locations
+          (provider_id, location, heading, speed_mps, accuracy_m, recorded_at, received_at, created_at, updated_at)
+        VALUES
+          (${providerId}::uuid, ST_SetSRID(ST_MakePoint(${newest.lng}, ${newest.lat}), 4326)::geography,
+           ${newest.heading ?? null}, ${newest.speed ?? null}, ${newest.accuracy}, ${new Date(newest.recordedAt)}, now(), now(), now())
+        ON CONFLICT (provider_id) DO UPDATE SET
+          location=EXCLUDED.location, heading=EXCLUDED.heading, speed_mps=EXCLUDED.speed_mps,
+          accuracy_m=EXCLUDED.accuracy_m, recorded_at=EXCLUDED.recorded_at, received_at=now(), updated_at=now()
+        WHERE provider_locations.recorded_at <= EXCLUDED.recorded_at
+        RETURNING recorded_at`;
+      return accepted.length === 1;
+    });
+    if (latestAccepted && profile.currentRequestId) {
+      await this.publishLocation(providerId, profile.currentRequestId, newest, new Date().toISOString());
+    }
+    return { success: true, accepted: ordered.length, latestAccepted };
+  }
+
+  private async publishLocation(providerId: string, requestId: string, point: LocationUpdateDto, receivedAt: string) {
+    this.realtimeGateway.emitProviderLocation(requestId, { requestId, providerId, ...point, receivedAt });
+    const now = Date.now();
+    if (now - (this.lastEtaRefresh.get(requestId) || 0) < 30_000) return;
+    const [distance] = await this.prisma.$queryRaw<Array<{ distance_m: number }>>`
+      SELECT ST_Distance(pickup_location, ST_SetSRID(ST_MakePoint(${point.lng}, ${point.lat}), 4326)::geography)::float AS distance_m
+      FROM service_requests WHERE id=${requestId}::uuid AND status='EN_ROUTE'`;
+    if (!distance) return;
+    const etaSeconds = Math.max(60, Math.round(distance.distance_m / 8.3));
+    await this.prisma.serviceRequest.update({ where: { id: requestId }, data: { etaSeconds } });
+    this.realtimeGateway.emitRequestEta(requestId, etaSeconds);
+    this.lastEtaRefresh.set(requestId, now);
   }
 
   private async ensureProfileExists(userId: string) {

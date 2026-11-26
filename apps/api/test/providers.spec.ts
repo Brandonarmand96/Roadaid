@@ -22,6 +22,9 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
 
   beforeEach(async () => {
     prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback(prisma)),
+      $executeRaw: jest.fn().mockResolvedValue(1),
       user: {
         update: jest.fn(),
         findUnique: jest.fn().mockResolvedValue({ id: 'prov-1', role: Role.PROVIDER, lastLoginAt: new Date() }),
@@ -31,6 +34,7 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
         upsert: jest.fn(),
         update: jest.fn(),
       },
+      serviceRequest: { update: jest.fn() },
       providerService: {
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn(),
@@ -56,6 +60,8 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
 
     realtimeGateway = {
       emitProviderAvailability: jest.fn(),
+      emitProviderLocation: jest.fn(),
+      emitRequestEta: jest.fn(),
     };
     wallet = { commissionPolicy: jest.fn().mockResolvedValue({ dueKobo: 0n, limitKobo: 5_000_000n, remainingKobo: 5_000_000n, blocked: false }) };
 
@@ -263,13 +269,23 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
   });
 
   describe('Location batch recovery', () => {
-    it('replays buffered points oldest-first and emits only the newest point', async () => {
-      const spy = jest.spyOn(service, 'updateLocation').mockResolvedValue({ success: true, receivedAt: new Date().toISOString(), warning: undefined });
+    it('persists a buffered batch in one transaction and emits only the newest point', async () => {
       const newest = { lat: 9.2, lng: 7.2, accuracy: 10, recordedAt: new Date().toISOString() };
       const oldest = { lat: 9.1, lng: 7.1, accuracy: 10, recordedAt: new Date(Date.now() - 30_000).toISOString() };
-      await service.updateLocationBatch('prov-1', [newest, oldest]);
-      expect(spy.mock.calls[0]).toEqual(['prov-1', oldest, false]);
-      expect(spy.mock.calls[1]).toEqual(['prov-1', newest, true]);
+      prisma.providerProfile.findUnique.mockResolvedValue({ userId: 'prov-1', currentRequestId: 'request-1' });
+      prisma.$queryRaw.mockResolvedValueOnce([{ recorded_at: new Date(newest.recordedAt) }]).mockResolvedValueOnce([]);
+      await expect(service.updateLocationBatch('prov-1', [newest, oldest])).resolves.toMatchObject({ accepted: 2, latestAccepted: true });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(realtimeGateway.emitProviderLocation).toHaveBeenCalledWith('request-1', expect.objectContaining({ providerId: 'prov-1', lat: newest.lat, lng: newest.lng }));
+    });
+
+    it('does not emit a delayed point that loses the monotonic latest-location write', async () => {
+      const point = { lat: 9.1, lng: 7.1, accuracy: 10, recordedAt: new Date(Date.now() - 30_000).toISOString() };
+      prisma.providerProfile.findUnique.mockResolvedValue({ userId: 'prov-1', currentRequestId: 'request-1' });
+      prisma.$queryRaw.mockResolvedValue([]);
+      await expect(service.updateLocation('prov-1', point)).resolves.toMatchObject({ accepted: false });
+      expect(realtimeGateway.emitProviderLocation).not.toHaveBeenCalled();
     });
 
     it('rejects a buffer larger than 200 points', async () => {

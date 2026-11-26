@@ -314,6 +314,7 @@ model ProviderLocationHistory {
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([providerId, recordedAt])
+  @@unique([providerId, recordedAt])
   @@map("provider_location_history")
 }
 

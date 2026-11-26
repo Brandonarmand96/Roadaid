@@ -76,6 +76,26 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       }));
       if (!allowed) return { success: false, error: 'Forbidden request room' };
       client.join(`request:${data.requestId}`);
+      const [snapshot] = await this.prisma.$queryRaw<Array<{
+        requestId: string;
+        providerId: string;
+        lat: number;
+        lng: number;
+        accuracy: number;
+        heading: number | null;
+        speed: number | null;
+        recordedAt: Date;
+        receivedAt: Date;
+      }>>`
+        SELECT sr.id AS "requestId", pl.provider_id AS "providerId",
+          ST_Y(pl.location::geometry)::float AS lat,
+          ST_X(pl.location::geometry)::float AS lng,
+          pl.accuracy_m::float AS accuracy, pl.heading, pl.speed_mps AS speed,
+          pl.recorded_at AS "recordedAt", pl.received_at AS "receivedAt"
+        FROM service_requests sr
+        JOIN provider_locations pl ON pl.provider_id=sr.provider_id
+        WHERE sr.id=${data.requestId}::uuid`;
+      if (snapshot) client.emit('provider.location', snapshot);
       this.logger.debug(`Socket ${client.id} joined room request:${data.requestId}`);
       return { success: true, room: `request:${data.requestId}` };
     }

@@ -684,3 +684,12 @@ Phase 3 dispatch is now authorized.
 - Refined customer service details and price review with service identity carried between screens, and converted request history into scannable service cards with status, payment and live-tracking context.
 - Kept RoadAid's charcoal, warm-white and amber identity; no competitor branding or out-of-scope services were introduced.
 - Verification: workspace lint and typecheck PASS; API regression suite PASS (99/99); Android production bundle export PASS (3,034 modules). Device visual acceptance remains required on the fresh EAS build because native map rendering cannot be validated in the TypeScript toolchain.
+
+### Phase 5 location-pipeline reliability — 26 Nov 2026
+
+- Made latest-provider-location writes monotonic by device `recorded_at`, so delayed offline-buffer delivery cannot move the authoritative position backwards or publish a stale point to customers.
+- Added idempotent active-job history storage with a unique provider/timestamp key; the migration safely removes pre-existing retry duplicates before creating the constraint.
+- Replaced per-point buffered replay transactions with one validated, ordered bulk-history insert plus one latest-position upsert for batches of up to 200 points.
+- Preserved server-owned 30-second ETA refresh and request-room location fan-out for the newest accepted batch point.
+- Request-room joins now send the latest stored assigned-provider position directly to the joining socket, giving customer reconnects an immediate map snapshot before the next live GPS event.
+- Verification: workspace lint and typecheck PASS; Prisma schema validation PASS; focused provider/realtime regressions PASS (23/23); full API regression suite PASS (102/102).
