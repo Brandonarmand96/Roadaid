@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { FuelDetailsDto, QuoteRequestDto, ServiceType, TowingDetailsDto } from '@roadaid/shared';
 import { MapsService } from '../maps/maps.service';
+import { commercialSplit } from './commercial-split';
 
 @Injectable()
 export class PricingService {
@@ -24,6 +25,7 @@ export class PricingService {
     const subtotal = rule.baseKobo + variableKobo;
     const priceKobo = subtotal > rule.minKobo ? subtotal : rule.minKobo;
     if (priceKobo > BigInt(Number.MAX_SAFE_INTEGER)) throw new BadRequestException('Calculated price exceeds the supported range');
+    const split = commercialSplit(dto.serviceType, priceKobo, { variableKobo: variableKobo.toString() });
     return {
       serviceType: dto.serviceType,
       priceKobo,
@@ -32,6 +34,8 @@ export class PricingService {
         baseKobo: Number(rule.baseKobo),
         variableKobo: Number(variableKobo),
         minKobo: Number(rule.minKobo),
+        platformFeeKobo: Number(split.platformFeeKobo),
+        providerPayoutKobo: Number(split.providerPayoutKobo),
       },
     };
   }

@@ -32,6 +32,7 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
         update: jest.fn(),
       },
       providerService: {
+        findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn(),
         upsert: jest.fn(),
       },
@@ -72,6 +73,11 @@ describe('ProvidersService & Availability Invariants (Phase 1)', () => {
   });
 
   describe('Provider Availability Invariants (Gate Requirement)', () => {
+    it('locks each provider account to one service specialty', async () => {
+      prisma.providerService.findFirst.mockResolvedValue({ serviceType: ServiceType.FUEL });
+      await expect(service.applyService('prov-1', ServiceType.TOWING)).rejects.toMatchObject({ response: expect.objectContaining({ code: 'PROVIDER_SERVICE_LOCKED' }) });
+      expect(prisma.providerService.upsert).not.toHaveBeenCalled();
+    });
     it('INVARIANT 1: Unapproved provider CANNOT go online', async () => {
       prisma.providerProfile.findUnique.mockResolvedValue({
         userId: 'prov-1',

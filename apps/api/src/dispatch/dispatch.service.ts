@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RequestStateService } from '../requests/request-state.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { lockedCommercialSplit } from '../pricing/commercial-split';
 import { WalletService } from '../wallet/wallet.service';
 import { verifyPickupPin } from '../requests/pickup-pin';
 
@@ -179,13 +180,14 @@ export class DispatchService implements OnModuleInit, OnModuleDestroy {
     ]);
     const serverNow = (serverClock[0]?.now ?? new Date()).toISOString();
     return offers.map((offer) => {
-      const commissionKobo = offer.request.priceKobo * BigInt(offer.request.commissionBps) / 10_000n;
+      const split = lockedCommercialSplit(offer.request.serviceType, offer.request.priceKobo, offer.request.priceBreakdown, offer.request.commissionBps);
+      const commissionKobo = split.platformFeeKobo;
       return {
         ...offer,
         request: {
           ...offer.request,
           commissionKobo,
-          providerNetKobo: offer.request.priceKobo - commissionKobo,
+          providerNetKobo: split.providerPayoutKobo,
         },
         serverNow,
       };

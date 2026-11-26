@@ -126,7 +126,7 @@ export default function CustomerExperience({
   const [notes, setNotes] = useState("");
   const [rating, setRating] = useState("5");
   const [feedback, setFeedback] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"ONLINE" | "CASH">("ONLINE");
+  const [paymentMethod] = useState<"CASH">("CASH");
   const [bookingForOther, setBookingForOther] = useState(false);
   const [beneficiary, setBeneficiary] = useState({ name: "", phone: "+234" });
   const [scheduleChoice, setScheduleChoice] = useState<"NOW" | "IN_1_HOUR" | "TOMORROW">("NOW");
@@ -514,6 +514,7 @@ export default function CustomerExperience({
             )}
             {service === ServiceType.LOCKOUT && (
               <>
+                <Notice title="Basic vehicle entry" body="The ₦12,000 lockout price covers non-destructive vehicle entry. Replacement keys, electronic programming, damaged locks and parts are not included." />
                 <Choices
                   values={Object.values(LockType)}
                   value={lockType}
@@ -589,19 +590,17 @@ export default function CustomerExperience({
             <Summary label="Service" value={service} />
             <Summary label="Pickup" value={pickup.address} />
             {bookingForOther ? <Summary label="Helping" value={`${beneficiary.name} · ${beneficiary.phone}`} /> : null}
-            <Summary label="Payment" value={paymentMethod === "CASH" ? "Cash to provider" : "Pay securely in RoadAid"} />
-            <Summary label="Base" value={money(quote.breakdown.baseKobo)} />
+            <Summary label="Payment" value="Pay the responder directly" />
+            <Summary label={service === ServiceType.FUEL ? "Delivery fee" : service === ServiceType.TOWING ? "Tow call-out (first 5 km)" : "Basic vehicle entry"} value={money(quote.breakdown.baseKobo)} />
             <Summary
-              label="Service charge"
+              label={service === ServiceType.FUEL ? "Fuel cost" : service === ServiceType.TOWING ? "Additional distance" : "Additional charge"}
               value={money(quote.breakdown.variableKobo)}
             />
             <View style={s.total}>
               <Text style={s.totalLabel}>Total</Text>
               <Text style={s.totalValue}>{money(quote.priceKobo)}</Text>
             </View>
-            <Text style={s.label}>How would you like to pay?</Text>
-            <Choices values={["ONLINE", "CASH"]} value={paymentMethod} onChange={(value) => setPaymentMethod(value as "ONLINE" | "CASH")} />
-            <Text style={s.muted}>{paymentMethod === "CASH" ? "Pay the exact total directly to your responder after they arrive. RoadAid will still issue a receipt." : "Pay securely in the app after a responder accepts."}</Text>
+            <Notice title="Direct payment" body="Pay the exact locked total directly to your verified responder after arrival. RoadAid calculates the fare and records confirmation, but does not collect the customer payment online." />
             <Text style={s.label}>When do you need help?</Text>
             <Choices values={["NOW", "IN_1_HOUR", "TOMORROW"]} value={scheduleChoice} onChange={(value) => setScheduleChoice(value as typeof scheduleChoice)} />
             {scheduleChoice !== "NOW" ? <Text style={s.muted}>RoadAid will begin matching responders at {new Date(Date.now() + (scheduleChoice === "IN_1_HOUR" ? 60 * 60_000 : 24 * 60 * 60_000)).toLocaleString("en-NG")}.</Text> : null}

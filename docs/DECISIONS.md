@@ -4,7 +4,7 @@ Recorded on: 9 Nov 2026 / 13 Nov 2026
 Reference: SPEC.md Section 19 & Blueprint Section 3
 
 ## 1. Baseline Defaults and Assumptions
-1. **Payment timing:** Customer chooses in-app or cash before submitting. In-app payment is due after acceptance (`ONLINE_AFTER_ACCEPT`) and cash is confirmed by the assigned provider after arrival; either must be confirmed before service starts.
+1. **Payment timing (updated 26 Nov 2026):** Customers pay the assigned provider directly after arrival. RoadAid calculates and locks the total but does not collect customer funds while `CUSTOMER_ONLINE_PAYMENTS_ENABLED=false`. Paystack integration remains dormant and tested for a future policy change. The provider confirms collection before service starts.
 2. **Cancellation fee:** ₦0 (0 kobo) until client sets specific commercial policy.
 3. **Placeholder prices (kobo):**
    - FUEL: Base ₦3,000 (300,000 kobo) + ₦1,500/litre (150,000 kobo/litre), min ₦3,000.

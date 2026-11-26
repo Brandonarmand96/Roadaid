@@ -34,6 +34,7 @@ export const envSchema = z.object({
   ADMIN_BOOTSTRAP_EMAIL: z.string().email().default('admin@roadaid.co'),
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(8).default('AdminSecurePassword2026!'),
   PAYMENT_MODE: z.enum(['ONLINE_AFTER_ACCEPT', 'ONLINE_ON_COMPLETION']).default('ONLINE_AFTER_ACCEPT'),
+  CUSTOMER_ONLINE_PAYMENTS_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV !== 'production') return;
 

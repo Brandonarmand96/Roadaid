@@ -1,16 +1,18 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, UnauthorizedException } from '@nestjs/common';
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
-import { LedgerEntryType, PaymentGateway, PaymentStatus, Prisma, RequestStatus } from '@prisma/client';
+import { LedgerEntryType, PaymentGateway, PaymentStatus, Prisma, RequestStatus, ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PAYMENT_GATEWAY_SERVICE, PaymentGatewayService } from './payment-gateway.interface';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WalletService } from '../wallet/wallet.service';
+import { lockedCommercialSplit } from '../pricing/commercial-split';
 
 @Injectable()
 export class PaymentsService {
   constructor(private readonly prisma: PrismaService, @Inject(PAYMENT_GATEWAY_SERVICE) private readonly gateway: PaymentGatewayService, @Optional() private readonly notifications?: NotificationsService) {}
 
   async initialize(customerId: string, requestId: string) {
+    if (process.env.CUSTOMER_ONLINE_PAYMENTS_ENABLED !== 'true') throw new BadRequestException({ code: 'ONLINE_PAYMENTS_DISABLED', message: 'Customer online payments are currently disabled' });
     const request = await this.prisma.serviceRequest.findFirst({ where: { id: requestId, customerId }, include: { customer: true } });
     if (!request) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Request not found' });
     if (request.paymentMode === 'CASH') throw new BadRequestException({ code: 'CASH_PAYMENT_SELECTED', message: 'This request will be paid in cash to the provider' });
@@ -32,14 +34,14 @@ export class PaymentsService {
 
   async collectCash(providerId: string, requestId: string) {
     const payment = await this.prisma.$transaction(async (tx) => {
-      const [request] = await tx.$queryRaw<Array<{ id: string; code: string; customer_id: string; provider_id: string | null; status: RequestStatus; payment_mode: string; payment_status: PaymentStatus; price_kobo: bigint; commission_bps: number }>>`
-        SELECT id, code, customer_id, provider_id, status, payment_mode, payment_status, price_kobo, commission_bps FROM service_requests WHERE id=${requestId}::uuid FOR UPDATE`;
+      const [request] = await tx.$queryRaw<Array<{ id: string; code: string; customer_id: string; provider_id: string | null; service_type: ServiceType; status: RequestStatus; payment_mode: string; payment_status: PaymentStatus; price_kobo: bigint; price_breakdown: unknown; commission_bps: number }>>`
+        SELECT id, code, customer_id, provider_id, service_type, status, payment_mode, payment_status, price_kobo, price_breakdown, commission_bps FROM service_requests WHERE id=${requestId}::uuid FOR UPDATE`;
       if (!request || request.provider_id !== providerId) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Active job not found' });
       if (request.payment_mode !== 'CASH') throw new BadRequestException({ code: 'NOT_CASH_REQUEST', message: 'This customer selected in-app payment' });
       if (!new Set<RequestStatus>([RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS]).has(request.status)) throw new BadRequestException({ code: 'CASH_NOT_DUE', message: 'Confirm cash only after arriving at the customer' });
       if (request.payment_status === PaymentStatus.PAID) return tx.payment.findFirst({ where: { requestId, status: PaymentStatus.PAID } });
       const reference = `RA-CASH-${randomUUID()}`;
-      const commission = request.price_kobo * BigInt(request.commission_bps) / 10_000n;
+      const commission = lockedCommercialSplit(request.service_type, request.price_kobo, request.price_breakdown, request.commission_bps).platformFeeKobo;
       const payment = await tx.payment.create({ data: { requestId, customerId: request.customer_id, gateway: PaymentGateway.MANUAL, reference, amountKobo: request.price_kobo, status: PaymentStatus.PAID, paidAt: new Date(), gatewayResponse: { method: 'CASH', collectedBy: providerId } } });
       await tx.serviceRequest.update({ where: { id: requestId }, data: { paymentStatus: PaymentStatus.PAID } });
       await tx.ledgerEntry.createMany({ data: [

@@ -7,24 +7,24 @@ export const APP_TIMEZONE = 'Africa/Lagos';
 // Default Pricing in Kobo (NGN minor units: 100 kobo = ₦1)
 export const DEFAULT_PRICING = {
   [ServiceType.FUEL]: {
-    baseKobo: 300000, // ₦3,000
-    perLitreKobo: 150000, // ₦1,500/litre
+    baseKobo: 600000, // ₦6,000 delivery
+    perLitreKobo: 135000, // initial pump-price placeholder: ₦1,350/litre
     perKmKobo: 0,
-    minKobo: 300000, // ₦3,000
+    minKobo: 600000, // ₦6,000
     towingFreeKm: 0,
   },
   [ServiceType.TOWING]: {
-    baseKobo: 1500000, // ₦15,000
+    baseKobo: 2750000, // ₦27,500 including first 5 km
     perLitreKobo: 0,
-    perKmKobo: 50000, // ₦500/km
-    minKobo: 1500000, // ₦15,000
-    towingFreeKm: 0,
+    perKmKobo: 150000, // ₦1,500/km thereafter
+    minKobo: 2750000,
+    towingFreeKm: 5,
   },
   [ServiceType.LOCKOUT]: {
-    baseKobo: 800000, // ₦8,000
+    baseKobo: 1200000, // ₦12,000
     perLitreKobo: 0,
     perKmKobo: 0,
-    minKobo: 800000, // ₦8,000
+    minKobo: 1200000,
     towingFreeKm: 0,
   },
 } as const;

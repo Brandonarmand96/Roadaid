@@ -26,7 +26,7 @@ Version 1.0 · 9 Nov 2026 · Companion to "RoadAid Platform — Product Scope, D
 
 RoadAid is an Uber/Bolt-style on-demand **roadside assistance** platform for **Abuja, Nigeria**.
 
-- **Services (3):** `FUEL` (emergency fuel delivery), `TOWING`, `LOCKOUT`.
+- **Services (3):** `FUEL` (emergency fuel delivery), `TOWING`, `LOCKOUT`. Each provider account is verified for exactly one service specialty.
 - **Interfaces (2):** One RoadAid mobile app with Customer and Provider modes, plus the Admin web dashboard — all served by one backend. Provider accounts may use both modes; customer accounts may use Customer mode only.
 - **Flow:** Customer selects service → confirms location → sees price → submits. Backend automatically finds the best eligible provider, sends a timed offer, falls through to the next provider on decline/timeout, confirms exactly one provider, and the customer then sees that provider's live location, ETA and phone number. Provider completes the job; platform records payment, commission and provider earnings. Admin intervenes when automation fails.
 - **Core principle:** one active job per provider. No overlapping assignments.
@@ -136,7 +136,8 @@ FCM_SERVICE_ACCOUNT_JSON=          # base64
 SENTRY_DSN=
 ADMIN_BOOTSTRAP_EMAIL=
 ADMIN_BOOTSTRAP_PASSWORD=
-PAYMENT_MODE=ONLINE_AFTER_ACCEPT   # default for in-app payments; customer may instead select CASH
+PAYMENT_MODE=ONLINE_AFTER_ACCEPT   # retained for reversible Paystack re-enablement
+CUSTOMER_ONLINE_PAYMENTS_ENABLED=false # customer pays provider directly by default
 CASH_COMMISSION_LIMIT_KOBO=5000000 # default ₦50,000; integer kobo only
 ```
 Mobile: `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY`, `EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY`.
@@ -180,7 +181,7 @@ LedgerEntryType:    CUSTOMER_PAYMENT | PROVIDER_EARNING | PLATFORM_COMMISSION | 
 
 **provider_profiles** — user_id (PK/FK), business_name (nullable), address, availability (enum, default OFFLINE), current_request_id (nullable FK), rating_avg, rating_count, completed_jobs, vehicle_make/model/plate (service vehicle), equipment_notes, onboarding_status (DRAFT | SUBMITTED | APPROVED | REJECTED | SUSPENDED), reviewed_by, reviewed_at, rejection_reason, wallet_balance_kobo (denormalised cache, ledger is truth).
 
-**provider_services** — id, provider_id, service_type, status (ApprovalStatus), details JSON (FUEL: `{containerCapacityLitres, fuelTypes[]}`; TOWING: `{truckType, maxVehicleWeightKg, plate}`; LOCKOUT: `{toolsDescription}`), approved_by, approved_at, rejection_reason. **Unique (provider_id, service_type).**
+**provider_services** — id, provider_id, service_type, status (ApprovalStatus), details JSON (FUEL: `{containerCapacityLitres, fuelTypes[]}`; TOWING: `{truckType, maxVehicleWeightKg, plate}`; LOCKOUT: `{toolsDescription}`), approved_by, approved_at, rejection_reason. **Unique provider_id: one provider account has exactly one service specialty.**
 
 **provider_documents** — id, provider_id, service_type (nullable = general), doc_type (NATIONAL_ID | DRIVERS_LICENCE | VEHICLE_PAPERS | EQUIPMENT_PHOTO | PROFILE_PHOTO | OTHER), storage_key, mime_type, size_bytes, status (PENDING|ACCEPTED|REJECTED), reviewed_by, note.
 
@@ -379,10 +380,10 @@ TOWING:  price = base + per_km * max(0, distance_km - towing_free_km)        # d
 LOCKOUT: price = base
 price = max(price, min_kobo)
 ```
-Return `{priceKobo, breakdown[], distanceKm}`. The quote is recomputed and **locked** in `service_requests.price_kobo` at creation; the app only displays what the server returns. Admin edits pricing in the dashboard (`pricing_rules`). Seed placeholder values: FUEL base ₦3,000 + ₦1,500/litre; TOWING base ₦15,000 + ₦500/km; LOCKOUT ₦8,000 — **marked as placeholders to be replaced by the client** in `docs/DECISIONS.md`.
+Return `{priceKobo, breakdown[], distanceKm}`. The quote is recomputed and **locked** in `service_requests.price_kobo` at creation; the app only displays what the server returns. Admin edits pricing in the dashboard (`pricing_rules`). Client-approved defaults: FUEL ₦6,000 delivery plus configured pump price per litre; TOWING ₦27,500 including 5 km then ₦1,500/km; LOCKOUT ₦12,000 for basic non-destructive entry. The locked breakdown also snapshots RoadAid's fee and the provider payout in integer kobo.
 
 ### 8.2 Payment flow
-`PAYMENT_MODE=ONLINE_AFTER_ACCEPT` (default):
+Paystack code remains available, but customer online collection is disabled while `CUSTOMER_ONLINE_PAYMENTS_ENABLED=false`. The default live flow is direct payment to the assigned provider, recorded as `CASH`. If the client enables online collection later, `PAYMENT_MODE=ONLINE_AFTER_ACCEPT` applies:
 1. After `ASSIGNED`, customer app shows "Pay ₦X" screen. Provider may travel (EN_ROUTE) while payment is pending, but cannot move to `IN_PROGRESS` until `payment_status = PAID` (admin can override with MANUAL payment).
 2. `POST /payments/initialize {requestId}` → creates `payments` row (unique reference `RA-PAY-<uuid>`), calls Paystack Initialize Transaction (amount in kobo, email = `<phone>@pay.roadaid.co` placeholder if user has no email, metadata `{requestId}`), returns `authorization_url` + `reference`. Customer app opens it in an in-app browser (`expo-web-browser`) or WebView, then polls `GET /payments/:reference/status`.
 3. Paystack calls `POST /webhooks/paystack`. Verify `x-paystack-signature` (HMAC SHA512 of raw body with secret key). Use raw body middleware for this route. Insert into `webhook_events` with unique `(gateway, event_id)`; if duplicate → return 200 immediately (idempotent). Re-verify via Paystack `GET /transaction/verify/:reference` and confirm amount and currency match the payment row before marking `PAID`.

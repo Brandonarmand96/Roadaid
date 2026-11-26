@@ -914,27 +914,22 @@ export default function App() {
         )}
         {step === "services" && (
           <Screen
-            title="What help can you provide?"
-            intro="Select only services you have the equipment and experience to complete safely."
+            title="Choose your service specialty"
+            intro="Each provider account operates one verified service so customers always receive the right responder and equipment."
           >
             {Object.values(ServiceType).map((service) => (
               <Choice
                 key={service}
                 label={service}
                 selected={services.includes(service)}
-                onPress={() =>
-                  setServices((current) =>
-                    current.includes(service)
-                      ? current.filter((item) => item !== service)
-                      : [...current, service],
-                  )
-                }
+                onPress={() => setServices([service])}
               />
             ))}
             <Button
               label="Save service capabilities"
               onPress={saveServices}
               busy={busy}
+              disabled={services.length !== 1}
             />
             <Link
               label="Back to vehicle details"

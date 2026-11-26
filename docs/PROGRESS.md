@@ -1,5 +1,13 @@
 # ROADAID — BUILD PROGRESS TRACKER
 
+## Client commercial policy implementation — 26 Nov 2026
+
+- Restricted each provider account to one verified specialty: fuel dispatch, towing, or vehicle lockout. API and database enforcement prevent a second service from being added.
+- Set launch pricing to ₦6,000 plus configured fuel cost, ₦27,500 towing including 5 km then ₦1,500/km, and ₦12,000 basic lockout.
+- Locked exact RoadAid fees and provider payouts into the integer-kobo price breakdown: fuel ₦2,500 RoadAid fee; lockout ₦2,000; towing ₦7,500 plus 20% of additional-distance charges.
+- Disabled customer online collection by default with `CUSTOMER_ONLINE_PAYMENTS_ENABLED=false`. Paystack code, webhooks and provider commission settlement remain available for a reversible future policy change.
+- Verification: Prisma schema validation PASS; workspace lint/typecheck PASS; API regression suite PASS (100/100); shared tests PASS (4/4); Android production bundle export PASS (2,996 modules). The migration deliberately stops if legacy providers already have multiple services so Operations can choose the retained specialty without silent data loss.
+
 ## Master/test feature parity audit — 26 Nov 2026
 
 - Reconciled the customer and provider mobile experience so both branches expose the same registration, onboarding, request, tracking, trust, payment, history and account capabilities.

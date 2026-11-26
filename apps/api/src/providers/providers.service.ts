@@ -112,6 +112,14 @@ export class ProvidersService {
     // Ensure profile exists
     await this.ensureProfileExists(providerId);
 
+    const existing = await this.prisma.providerService.findFirst({ where: { providerId } });
+    if (existing && existing.serviceType !== serviceType) {
+      throw new ConflictException({
+        code: 'PROVIDER_SERVICE_LOCKED',
+        message: `This provider is registered for ${existing.serviceType}. Each provider account can operate one service only.`,
+      });
+    }
+
     return this.prisma.providerService.upsert({
       where: {
         providerId_serviceType: {
@@ -259,10 +267,10 @@ export class ProvidersService {
       });
     }
 
-    if (profile.services.length === 0) {
+    if (profile.services.length !== 1) {
       throw new BadRequestException({
-        code: 'NO_SERVICES_REGISTERED',
-        message: 'You must apply for at least one service category (Fuel, Towing, or Lockout)',
+        code: 'ONE_SERVICE_REQUIRED',
+        message: 'Choose exactly one service category for this provider account',
       });
     }
 

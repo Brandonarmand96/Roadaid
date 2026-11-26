@@ -26,11 +26,18 @@ describe('PaymentsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.CUSTOMER_ONLINE_PAYMENTS_ENABLED = 'true';
     service = new PaymentsService(prisma, gateway);
     prisma.payment.findUnique.mockResolvedValue(payment);
     tx.payment.findUniqueOrThrow.mockResolvedValue(payment);
     tx.payment.update.mockResolvedValue({ ...payment, status: PaymentStatus.PAID });
     tx.ledgerEntry.findFirst.mockResolvedValue(null);
+  });
+
+  it('keeps Paystack available but disables customer initialization by policy', async () => {
+    process.env.CUSTOMER_ONLINE_PAYMENTS_ENABLED = 'false';
+    await expect(service.initialize('customer-1', 'request-1')).rejects.toMatchObject({ response: expect.objectContaining({ code: 'ONLINE_PAYMENTS_DISABLED' }) });
+    expect(gateway.initialize).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid webhook signature', async () => {
@@ -65,13 +72,13 @@ describe('PaymentsService', () => {
   });
 
   it('records cash as provider-held money and an exact commission debt', async () => {
-    tx.$queryRaw.mockResolvedValue([{ id: 'request-1', code: 'RA-1', customer_id: 'customer-1', provider_id: 'provider-1', status: RequestStatus.ARRIVED, payment_mode: 'CASH', payment_status: PaymentStatus.NONE, price_kobo: 10001n, commission_bps: 1500 }]);
+    tx.$queryRaw.mockResolvedValue([{ id: 'request-1', code: 'RA-1', customer_id: 'customer-1', provider_id: 'provider-1', service_type: 'FUEL', status: RequestStatus.ARRIVED, payment_mode: 'CASH', payment_status: PaymentStatus.NONE, price_kobo: 10001n, price_breakdown: { platformFeeKobo: 2500, providerPayoutKobo: 7501 }, commission_bps: 1500 }]);
     tx.payment.create.mockResolvedValue({ id: 'cash-payment-1' });
     await service.collectCash('provider-1', 'request-1');
     const rows = tx.ledgerEntry.createMany.mock.calls[0][0].data;
     expect(rows[0]).toEqual(expect.objectContaining({ type: 'CUSTOMER_PAYMENT', amountKobo: 10001n }));
-    expect(rows[1]).toEqual(expect.objectContaining({ type: 'PLATFORM_COMMISSION', providerId: 'provider-1', amountKobo: -1500n }));
-    expect(tx.providerProfile.update).toHaveBeenCalledWith(expect.objectContaining({ data: { walletBalanceKobo: { decrement: 1500n } } }));
+    expect(rows[1]).toEqual(expect.objectContaining({ type: 'PLATFORM_COMMISSION', providerId: 'provider-1', amountKobo: -2500n }));
+    expect(tx.providerProfile.update).toHaveBeenCalledWith(expect.objectContaining({ data: { walletBalanceKobo: { decrement: 2500n } } }));
   });
 
   it('rejects cash confirmation from a provider who does not own the job', async () => {

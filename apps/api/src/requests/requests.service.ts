@@ -23,6 +23,9 @@ export class RequestsService {
   ) {}
 
   async create(customerId: string, dto: CreateServiceRequestDto) {
+    if (dto.paymentMethod === "ONLINE" && process.env.CUSTOMER_ONLINE_PAYMENTS_ENABLED !== "true") {
+      throw new BadRequestException({ code: "ONLINE_PAYMENTS_DISABLED", message: "Pay the responder directly after arrival. Online payment is currently unavailable." });
+    }
     const scheduledFor = dto.scheduledFor ? new Date(dto.scheduledFor) : null;
     if (scheduledFor) {
       const delayMs = scheduledFor.getTime() - Date.now();
@@ -108,6 +111,8 @@ export class RequestsService {
             serviceType: dto.serviceType,
             priceKobo: quote.priceKobo.toString(),
             paymentMethod: dto.paymentMethod,
+            platformFeeKobo: quote.breakdown.platformFeeKobo,
+            providerPayoutKobo: quote.breakdown.providerPayoutKobo,
             scheduledFor: scheduledFor?.toISOString() || null,
           },
         },

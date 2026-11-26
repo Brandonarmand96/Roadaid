@@ -30,48 +30,48 @@ async function main() {
   console.log(`Bootstrap admin ready: ${admin.email} (id: ${admin.id})`);
 
   // 2. Pricing Rules
-  // FUEL: Base ₦3,000 (300000 kobo), ₦1,500/litre (150000 kobo), min ₦3,000
+  // FUEL: ₦6,000 delivery + current configured pump price per litre.
   await prisma.pricingRule.upsert({
     where: { serviceType: ServiceType.FUEL },
     update: {},
     create: {
       serviceType: ServiceType.FUEL,
-      baseKobo: BigInt(300000),
-      perLitreKobo: BigInt(150000),
+      baseKobo: BigInt(600000),
+      perLitreKobo: BigInt(135000),
       perKmKobo: BigInt(0),
-      minKobo: BigInt(300000),
+      minKobo: BigInt(600000),
       towingFreeKm: 0,
       active: true,
       updatedBy: admin.id,
     },
   });
 
-  // TOWING: Base ₦15,000 (1500000 kobo), ₦500/km (50000 kobo), min ₦15,000
+  // TOWING: ₦27,500 includes 5 km, then ₦1,500/km.
   await prisma.pricingRule.upsert({
     where: { serviceType: ServiceType.TOWING },
     update: {},
     create: {
       serviceType: ServiceType.TOWING,
-      baseKobo: BigInt(1500000),
+      baseKobo: BigInt(2750000),
       perLitreKobo: BigInt(0),
-      perKmKobo: BigInt(50000),
-      minKobo: BigInt(1500000),
-      towingFreeKm: 0,
+      perKmKobo: BigInt(150000),
+      minKobo: BigInt(2750000),
+      towingFreeKm: 5,
       active: true,
       updatedBy: admin.id,
     },
   });
 
-  // LOCKOUT: Base ₦8,000 (800000 kobo), min ₦8,000
+  // LOCKOUT: ₦12,000 for basic non-destructive entry.
   await prisma.pricingRule.upsert({
     where: { serviceType: ServiceType.LOCKOUT },
     update: {},
     create: {
       serviceType: ServiceType.LOCKOUT,
-      baseKobo: BigInt(800000),
+      baseKobo: BigInt(1200000),
       perLitreKobo: BigInt(0),
       perKmKobo: BigInt(0),
-      minKobo: BigInt(800000),
+      minKobo: BigInt(1200000),
       towingFreeKm: 0,
       active: true,
       updatedBy: admin.id,
