@@ -1247,8 +1247,8 @@ function ProviderCommandCenter({ point, token, availability, trackingState, comm
               <Summary label="Payment" value={job.paymentMode === "CASH" ? `Collect ${money(job.priceKobo ?? 0)} cash` : job.paymentStatus === "PAID" ? "Paid in RoadAid" : "Awaiting in-app payment"} />
               {pickup ? <SecondaryButton label="Navigate to pickup" onPress={() => openNavigation(job)} /> : null}
               {job.status === "EN_ROUTE" ? <Field label="Customer pickup PIN" value={pickupPin} onChangeText={(value) => onPickupPinChange(value.replace(/\D/g, "").slice(0, 4))} keyboardType="number-pad" maxLength={4} placeholder="4 digits" /> : null}
-              {job.paymentMode === "CASH" && job.status === "ARRIVED" && job.paymentStatus !== "PAID" ? <Button label={`Confirm ${money(job.priceKobo ?? 0)} cash received`} onPress={onCollectCash} busy={busy} /> : null}
-              {nextAction && !(nextAction[1] === "IN_PROGRESS" && job.paymentStatus !== "PAID") ? <Button label={nextAction[0]} onPress={() => onProgress(nextAction[1])} busy={busy} /> : null}
+              {job.paymentMode === "CASH" && job.status === "IN_PROGRESS" && job.paymentStatus !== "PAID" ? <Button label={`Service finished · confirm ${money(job.priceKobo ?? 0)} received`} onPress={onCollectCash} busy={busy} /> : null}
+              {nextAction && !(nextAction[1] === "COMPLETED" && job.paymentMode === "CASH" && job.paymentStatus !== "PAID") ? <Button label={nextAction[0]} onPress={() => onProgress(nextAction[1])} busy={busy} /> : null}
               <Link label="Cancel and return job to search" onPress={onCancelJob} />
             </> : offer ? <>
               <View style={s.offerHeading}><View><Text style={s.providerSheetTitle}>{offer.request.serviceType} request</Text><Text style={s.providerSheetIntro}>{offer.request.pickupAddress}</Text></View><View style={s.offerTimer}><Clock3 color="#191D23" size={18} /><Text style={s.offerTimerText}>{secondsLeft}s</Text></View></View>

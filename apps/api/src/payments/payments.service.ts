@@ -38,7 +38,7 @@ export class PaymentsService {
         SELECT id, code, customer_id, provider_id, service_type, status, payment_mode, payment_status, price_kobo, price_breakdown, commission_bps FROM service_requests WHERE id=${requestId}::uuid FOR UPDATE`;
       if (!request || request.provider_id !== providerId) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: 'Active job not found' });
       if (request.payment_mode !== 'CASH') throw new BadRequestException({ code: 'NOT_CASH_REQUEST', message: 'This customer selected in-app payment' });
-      if (!new Set<RequestStatus>([RequestStatus.ARRIVED, RequestStatus.IN_PROGRESS]).has(request.status)) throw new BadRequestException({ code: 'CASH_NOT_DUE', message: 'Confirm cash only after arriving at the customer' });
+      if (!new Set<RequestStatus>([RequestStatus.IN_PROGRESS, RequestStatus.COMPLETED]).has(request.status)) throw new BadRequestException({ code: 'CASH_NOT_DUE', message: 'Confirm direct payment only after the roadside service has been performed' });
       if (request.payment_status === PaymentStatus.PAID) return tx.payment.findFirst({ where: { requestId, status: PaymentStatus.PAID } });
       const reference = `RA-CASH-${randomUUID()}`;
       const commission = lockedCommercialSplit(request.service_type, request.price_kobo, request.price_breakdown, request.commission_bps).platformFeeKobo;
@@ -55,6 +55,7 @@ export class PaymentsService {
     const [row] = await this.prisma.$queryRaw<Array<{ due: bigint }>>`SELECT GREATEST(0, -COALESCE(SUM(amount_kobo), 0))::bigint AS due FROM ledger_entries WHERE provider_id=${providerId}::uuid AND (type='PLATFORM_COMMISSION' OR (type='ADJUSTMENT' AND description LIKE 'Cash commission settlement%'))`;
     const dueKobo = row?.due ?? 0n;
     const limitKobo = WalletService.commissionLimitKobo();
+    if (payment) await this.notifications?.send(payment.customerId, { title: 'Payment recorded', body: `Your responder confirmed receiving ₦${Math.trunc(Number(payment.amountKobo) / 100).toLocaleString('en-NG')}. Open the request receipt or report a problem if this is incorrect.`, data: { type: 'DIRECT_PAYMENT_RECORDED', requestId, paymentId: payment.id }, priority: 'high' });
     await this.notifications?.send(providerId, { title: dueKobo >= limitKobo ? 'Commission limit reached' : 'Cash commission recorded', body: dueKobo >= limitKobo ? 'Finish this job, then repay commission before you can receive another offer.' : 'Your cash commission balance has been updated. Repay it from Account & earnings.', data: { type: 'COMMISSION_REPAYMENT_DUE', dueKobo: dueKobo.toString(), limitKobo: limitKobo.toString() }, priority: 'high' });
     return payment;
   }

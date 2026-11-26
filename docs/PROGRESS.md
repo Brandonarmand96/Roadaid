@@ -7,6 +7,7 @@
 - Locked exact RoadAid fees and provider payouts into the integer-kobo price breakdown: fuel ₦2,500 RoadAid fee; lockout ₦2,000; towing ₦7,500 plus 20% of additional-distance charges.
 - Disabled customer online collection by default with `CUSTOMER_ONLINE_PAYMENTS_ENABLED=false`. Paystack code, webhooks and provider commission settlement remain available for a reversible future policy change.
 - Verification: Prisma schema validation PASS; workspace lint/typecheck PASS; API regression suite PASS (100/100); shared tests PASS (4/4); Android production bundle export PASS (2,996 modules). The migration deliberately stops if legacy providers already have multiple services so Operations can choose the retained specialty without silent data loss.
+- Corrected direct-payment timing after client review: cash is never required before service starts. The responder performs the service, confirms receipt afterwards, and only then closes the job; RoadAid notifies the customer with the recorded amount and dispute path.
 
 ## Master/test feature parity audit — 26 Nov 2026
 

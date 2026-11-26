@@ -27,7 +27,7 @@ export class RequestStateService {
       if (!transitions[current.status].includes(to)) throw new BadRequestException({ code: 'INVALID_REQUEST_TRANSITION', message: `Cannot transition from ${current.status} to ${to}` });
       if (to === RequestStatus.IN_PROGRESS) {
         const paymentGate = await tx.serviceRequest.findUniqueOrThrow({ where: { id: requestId }, select: { paymentMode: true, paymentStatus: true } });
-        if (new Set(['ONLINE_AFTER_ACCEPT', 'CASH']).has(paymentGate.paymentMode) && paymentGate.paymentStatus !== PaymentStatus.PAID) throw new BadRequestException({ code: 'PAYMENT_REQUIRED', message: paymentGate.paymentMode === 'CASH' ? 'Confirm the customer cash payment before starting service' : 'Payment is required before service can begin' });
+        if (paymentGate.paymentMode === 'ONLINE_AFTER_ACCEPT' && paymentGate.paymentStatus !== PaymentStatus.PAID) throw new BadRequestException({ code: 'PAYMENT_REQUIRED', message: 'Payment is required before service can begin' });
       }
       const timestampData = to === RequestStatus.ARRIVED ? { arrivedAt: new Date() }
           : to === RequestStatus.IN_PROGRESS ? { startedAt: new Date() }

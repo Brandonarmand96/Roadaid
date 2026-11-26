@@ -72,7 +72,7 @@ describe('PaymentsService', () => {
   });
 
   it('records cash as provider-held money and an exact commission debt', async () => {
-    tx.$queryRaw.mockResolvedValue([{ id: 'request-1', code: 'RA-1', customer_id: 'customer-1', provider_id: 'provider-1', service_type: 'FUEL', status: RequestStatus.ARRIVED, payment_mode: 'CASH', payment_status: PaymentStatus.NONE, price_kobo: 10001n, price_breakdown: { platformFeeKobo: 2500, providerPayoutKobo: 7501 }, commission_bps: 1500 }]);
+    tx.$queryRaw.mockResolvedValue([{ id: 'request-1', code: 'RA-1', customer_id: 'customer-1', provider_id: 'provider-1', service_type: 'FUEL', status: RequestStatus.IN_PROGRESS, payment_mode: 'CASH', payment_status: PaymentStatus.NONE, price_kobo: 10001n, price_breakdown: { platformFeeKobo: 2500, providerPayoutKobo: 7501 }, commission_bps: 1500 }]);
     tx.payment.create.mockResolvedValue({ id: 'cash-payment-1' });
     await service.collectCash('provider-1', 'request-1');
     const rows = tx.ledgerEntry.createMany.mock.calls[0][0].data;
