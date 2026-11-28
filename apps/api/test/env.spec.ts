@@ -46,7 +46,7 @@ describe('Environment Config Validation', () => {
       DATABASE_URL: 'postgresql://roadaid:strong-password@db.internal:5432/roadaid?schema=public',
       JWT_ACCESS_SECRET: 'production-access-secret-with-at-least-thirty-two-characters',
       JWT_REFRESH_SECRET: 'production-refresh-secret-with-at-least-thirty-two-characters',
-      CORS_ORIGINS: 'https://admin.roadaid.co',
+      CORS_ORIGINS: 'https://admin.roadaid.ng',
       SMS_PROVIDER: 'termii',
       TERMII_API_KEY: 'termii-test-value',
       PAYSTACK_SECRET_KEY: 'sk_live_test-value',

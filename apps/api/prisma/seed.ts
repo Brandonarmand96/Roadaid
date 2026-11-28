@@ -7,7 +7,7 @@ async function main() {
   console.log('Seeding RoadAid database...');
 
   // 1. Bootstrap Super Admin
-  const adminEmail = process.env.ADMIN_BOOTSTRAP_EMAIL || 'admin@roadaid.co';
+  const adminEmail = process.env.ADMIN_BOOTSTRAP_EMAIL || 'admin@roadaid.ng';
   const adminPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD || 'AdminSecurePassword2026!';
   const bootstrapPhone = '+2348000000000';
   const existingAdmin = await prisma.user.findFirst({

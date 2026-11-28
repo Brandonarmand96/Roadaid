@@ -4,7 +4,7 @@
 
 The client must own and control recovery access, billing and MFA for:
 
-- Domain/DNS and `roadaid.co`
+- Domain/DNS and `roadaid.ng`
 - Production hosting/container registry
 - PostgreSQL and Redis hosting
 - AWS/S3-compatible storage

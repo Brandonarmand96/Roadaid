@@ -10,12 +10,14 @@
 
 ## Production deployment
 
+For first-time account, Droplet, DNS, Google Maps, storage and EAS setup, follow `docs/DEPLOYMENT.md`. The steps below are the operator's release checklist after that baseline exists.
+
 1. Tag the known-good release and record its image digests.
 2. Back up PostgreSQL and verify the resulting gzip file is non-empty.
 3. Confirm `.env.production` contains unique secrets, production Termii/Paystack values, `CORS_ORIGINS`, and no development OTP code.
 4. Build immutable API/admin images.
-5. Run `pnpm --filter api db:migrate` once against the production database.
-6. Start PostgreSQL/Redis, then API, then admin.
+5. Let the Compose `migrate` service run `prisma migrate deploy` once against the production database; never seed on an ordinary restart.
+6. Start PostgreSQL/Redis, complete migration, then API/admin and finally Caddy.
 7. Verify `/health`, `/ready`, admin login, one OTP request, one quote and a non-charging smoke request.
 8. Monitor API errors, BullMQ failures, Redis memory and PostgreSQL connections for at least 15 minutes.
 

@@ -3,11 +3,15 @@ RUN corepack enable && corepack prepare pnpm@12.18.0 --activate
 
 FROM base AS builder
 WORKDIR /app
-COPY package.json pnpm-workspace.yaml turbo.json ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json ./
 COPY packages/ packages/
 COPY apps/admin-web/ apps/admin-web/
-RUN pnpm install --frozen-lockfile=false
+RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @roadaid/shared build
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
 RUN pnpm --filter admin-web build
 
 FROM base AS runner

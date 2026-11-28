@@ -31,7 +31,7 @@ export const envSchema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().default('provider-documents'),
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
-  ADMIN_BOOTSTRAP_EMAIL: z.string().email().default('admin@roadaid.co'),
+  ADMIN_BOOTSTRAP_EMAIL: z.string().email().default('admin@roadaid.ng'),
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(8).default('AdminSecurePassword2026!'),
   PAYMENT_MODE: z.enum(['ONLINE_AFTER_ACCEPT', 'ONLINE_ON_COMPLETION']).default('ONLINE_AFTER_ACCEPT'),
   CUSTOMER_ONLINE_PAYMENTS_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),

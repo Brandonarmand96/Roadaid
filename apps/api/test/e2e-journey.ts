@@ -64,7 +64,7 @@ async function cleanup() {
 
 async function main() {
   const health = await fetch(`${socketUrl}/health`); if (!health.ok) throw new Error(`API health check failed (${health.status})`);
-  const admin = await http<{ accessToken: string }>('/admin/auth/login', { method: 'POST', body: JSON.stringify({ email: process.env.ADMIN_BOOTSTRAP_EMAIL || 'admin@roadaid.co', password: process.env.ADMIN_BOOTSTRAP_PASSWORD || 'AdminSecurePassword2026!' }) });
+  const admin = await http<{ accessToken: string }>('/admin/auth/login', { method: 'POST', body: JSON.stringify({ email: process.env.ADMIN_BOOTSTRAP_EMAIL || 'admin@roadaid.ng', password: process.env.ADMIN_BOOTSTRAP_PASSWORD || 'AdminSecurePassword2026!' }) });
   const customer = await loginPhone(customerPhone); createdUserIds.push(customer.user.id);
   const providers: Array<{ id: string; token: string; service: ServiceType }> = [];
   for (let index = 0; index < services.length; index++) {

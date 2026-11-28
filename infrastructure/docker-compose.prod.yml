@@ -1,39 +1,113 @@
 services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: roadaid-caddy-prod
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-roadaid.ng}
+      API_DOMAIN: ${API_DOMAIN:-api.roadaid.ng}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.api
+    restart: "no"
+    env_file: ${ENV_FILE:-.env.production}
+    command: ["./apps/api/node_modules/.bin/prisma", "migrate", "deploy", "--schema", "apps/api/prisma/schema.prisma"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bootstrap-admin:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.api
+    profiles: ["tools"]
+    restart: "no"
+    env_file: ${ENV_FILE:-.env.production}
+    command: ["./apps/api/node_modules/.bin/ts-node", "apps/api/prisma/seed.ts"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   api:
     build:
       context: ..
       dockerfile: infrastructure/docker/Dockerfile.api
     container_name: roadaid-api-prod
-    restart: always
-    env_file: .env.production
-    ports:
-      - "3000:3000"
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.production}
+    expose:
+      - "3000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   admin:
     build:
       context: ..
       dockerfile: infrastructure/docker/Dockerfile.admin
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+        NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY:-}
     container_name: roadaid-admin-prod
-    restart: always
-    env_file: .env.production
-    ports:
-      - "3001:3000"
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.production}
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   postgres:
     image: postgis/postgis:16-3.4
     container_name: roadaid-postgres-prod
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-roadaid}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-roadaid}
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=30
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-roadaid} -d ${POSTGRES_DB:-roadaid}"]
       interval: 10s
@@ -43,10 +117,10 @@ services:
   redis:
     image: redis:7-alpine
     container_name: roadaid-redis-prod
-    restart: always
+    restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --maxmemory 128mb --maxmemory-policy noeviction
     volumes:
       - redis_prod_data:/data
     healthcheck:
@@ -56,5 +130,7 @@ services:
       retries: 5
 
 volumes:
+  caddy_data:
+  caddy_config:
   postgres_prod_data:
   redis_prod_data:

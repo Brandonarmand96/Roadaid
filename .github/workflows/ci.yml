@@ -73,7 +73,7 @@ jobs:
           DATABASE_URL: postgresql://roadaid:roadaid@localhost:5432/roadaid?schema=public
           JWT_ACCESS_SECRET: development_jwt_access_secret_key_minimum_32_characters_long_for_security
           JWT_REFRESH_SECRET: development_jwt_refresh_secret_key_minimum_32_characters_long_for_security
-          ADMIN_BOOTSTRAP_EMAIL: admin@roadaid.co
+          ADMIN_BOOTSTRAP_EMAIL: admin@roadaid.ng
           ADMIN_BOOTSTRAP_PASSWORD: AdminSecurePassword2026!
 
       - name: Run unit & integration tests

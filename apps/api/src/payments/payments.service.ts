@@ -24,7 +24,7 @@ export class PaymentsService {
     const reference = `RA-PAY-${randomUUID()}`;
     const payment = await this.prisma.payment.create({ data: { requestId, customerId, gateway: PaymentGateway.PAYSTACK, reference, amountKobo: request.priceKobo, status: PaymentStatus.PENDING, idempotencyKey: reference } });
     try {
-      const initialized = await this.gateway.initialize({ reference, amountKobo: request.priceKobo, email: request.customer.email || `${request.customer.phone.replace('+', '')}@pay.roadaid.co`, requestId });
+      const initialized = await this.gateway.initialize({ reference, amountKobo: request.priceKobo, email: request.customer.email || `${request.customer.phone.replace('+', '')}@pay.roadaid.ng`, requestId });
       return { reference, authorizationUrl: initialized.authorizationUrl, amountKobo: request.priceKobo };
     } catch (error) {
       await this.prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.FAILED } });
@@ -70,7 +70,7 @@ export class PaymentsService {
     const reference = `RA-COM-${randomUUID()}`;
     const payment = await this.prisma.payment.create({ data: { requestId, customerId: providerId, gateway: PaymentGateway.PAYSTACK, reference, amountKobo, status: PaymentStatus.PENDING, idempotencyKey: reference, gatewayResponse: { purpose: 'CASH_COMMISSION_SETTLEMENT', providerId } } });
     try {
-      const initialized = await this.gateway.initialize({ reference, amountKobo, email: request.provider?.email || `${request.provider?.phone.replace('+', '')}@pay.roadaid.co`, requestId });
+      const initialized = await this.gateway.initialize({ reference, amountKobo, email: request.provider?.email || `${request.provider?.phone.replace('+', '')}@pay.roadaid.ng`, requestId });
       return { reference, authorizationUrl: initialized.authorizationUrl, amountKobo, requestId };
     } catch (error) {
       await this.prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.FAILED } });

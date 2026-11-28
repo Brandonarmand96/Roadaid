@@ -1,0 +1,23 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$SITE_DOMAIN}, www.{$SITE_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy admin:3000
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:3000
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

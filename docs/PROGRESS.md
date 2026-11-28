@@ -702,3 +702,13 @@ Phase 3 dispatch is now authorized.
 - Preserved server-owned 30-second ETA refresh and request-room location fan-out for the newest accepted batch point.
 - Request-room joins now send the latest stored assigned-provider position directly to the joining socket, giving customer reconnects an immediate map snapshot before the next live GPS event.
 - Verification: workspace lint and typecheck PASS; Prisma schema validation PASS; focused provider/realtime regressions PASS (23/23); full API regression suite PASS (102/102).
+
+### Production edge and deployment hardening — 28 Nov 2026
+
+- Added Caddy as the sole public edge for `roadaid.ng`, `www.roadaid.ng` and `api.roadaid.ng`, with automatic HTTPS, persistent certificate state, compression and baseline response headers.
+- Removed direct host exposure of the API and Next.js ports; PostgreSQL and Redis remain container-network only.
+- Added production health checks and explicit migration ordering. Normal API restarts no longer run the seed script; administrator bootstrap is an explicit one-time tools-profile command.
+- Made the admin API URL and Google Maps browser key available at Next.js build time and restored frozen-lockfile Docker builds.
+- Tuned containerized PostgreSQL/Redis for the initial 2-GB Droplet budget and retained Redis AOF persistence.
+- Added a complete first-deployment guide covering client-owned accounts, SSH, reserved IP/firewalls, swap, Docker, private Git access, secrets, OneBit DNS, Google Maps key restrictions, storage, EAS builds, integration setup, verification, backups, release and capacity monitoring.
+- Verification: production Compose configuration renders successfully using the checked-in example environment; workspace lint and typecheck PASS; API/shared regressions PASS (102 API + 4 shared); workspace production build PASS. A local Docker image build could not run because Docker Desktop's engine was not running, so the guide requires the image build on the provisioned Ubuntu host before deployment.

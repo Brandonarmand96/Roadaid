@@ -177,14 +177,14 @@ describe('AuthService (Phase 1)', () => {
       const passwordHash = await argon2.hash('AdminSecret123!');
       prisma.user.findUnique.mockResolvedValue({
         id: 'admin-1',
-        email: 'ops@roadaid.co',
+        email: 'ops@roadaid.ng',
         role: Role.ADMIN,
         adminRole: 'OPERATIONS',
         status: UserStatus.ACTIVE,
         passwordHash,
       });
 
-      const result = await authService.adminLogin('ops@roadaid.co', 'AdminSecret123!');
+      const result = await authService.adminLogin('ops@roadaid.ng', 'AdminSecret123!');
       expect(result.accessToken).toBeDefined();
       expect(result.user.role).toBe(Role.ADMIN);
     });
@@ -193,7 +193,7 @@ describe('AuthService (Phase 1)', () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(
-        authService.adminLogin('unknown@roadaid.co', 'password'),
+        authService.adminLogin('unknown@roadaid.ng', 'password'),
       ).rejects.toThrow(UnauthorizedException);
     });
   });
