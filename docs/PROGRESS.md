@@ -1,5 +1,14 @@
 # ROADAID — BUILD PROGRESS TRACKER
 
+## Public website and admin route separation — 28 Nov 2026
+
+- Added the approved public informational website scope to `SPEC.md` while retaining the prohibition on customer/provider web apps.
+- Added a responsive RoadAid homepage at `/` presenting the three supported services, sequential dispatch journey, provider registration path and honest mobile-testing status.
+- Moved the existing operations console from `/` to `/admin`; backend `/admin/*` API routes are unchanged.
+- Preserved the established RoadAid charcoal, warm-white and amber identity, used no fabricated testimonials or performance claims, and included keyboard-focus and reduced-motion behavior.
+- Verification: full workspace lint PASS, typecheck PASS, tests PASS (102 API + 4 shared), and production build PASS. `/` and `/admin` render successfully at desktop and 390 px mobile widths; Impeccable mechanical detector returned no findings.
+- Public-navigation refinement: removed all public links to `/admin`. The admin route remains directly accessible to authorised staff.
+
 ## Client commercial policy implementation — 26 Nov 2026
 
 - Restricted each provider account to one verified specialty: fuel dispatch, towing, or vehicle lockout. API and database enforcement prevent a second service from being added.

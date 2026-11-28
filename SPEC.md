@@ -27,7 +27,7 @@ Version 1.0 · 9 Nov 2026 · Companion to "RoadAid Platform — Product Scope, D
 RoadAid is an Uber/Bolt-style on-demand **roadside assistance** platform for **Abuja, Nigeria**.
 
 - **Services (3):** `FUEL` (emergency fuel delivery), `TOWING`, `LOCKOUT`. Each provider account is verified for exactly one service specialty.
-- **Interfaces (2):** One RoadAid mobile app with Customer and Provider modes, plus the Admin web dashboard — all served by one backend. Provider accounts may use both modes; customer accounts may use Customer mode only.
+- **Interfaces (3):** One RoadAid mobile app with Customer and Provider modes, the Admin web dashboard, and a public informational website — all served by one backend/web deployment. Provider accounts may use both mobile modes; customer accounts may use Customer mode only.
 - **Flow:** Customer selects service → confirms location → sees price → submits. Backend automatically finds the best eligible provider, sends a timed offer, falls through to the next provider on decline/timeout, confirms exactly one provider, and the customer then sees that provider's live location, ETA and phone number. Provider completes the job; platform records payment, commission and provider earnings. Admin intervenes when automation fails.
 - **Core principle:** one active job per provider. No overlapping assignments.
 - Brand: RoadAid, tagline "BUILT FOR CERTAINTY". Website: https://roadaid.co.
@@ -532,10 +532,18 @@ Screens: Splash → Phone/OTP → **Onboarding wizard** (profile → select serv
 - Handle: location permission wizard, battery optimisation guidance, offline banner, being forced offline when stale, unapproved/suspended states, resync on foreground.
 - Build via EAS dev client; configure Android foreground service and iOS `UIBackgroundModes: ["location","remote-notification"]` with usage strings.
 
-### 12.3 Admin dashboard (`apps/admin-web`)
+### 12.3 Admin dashboard (`apps/admin-web`, route `/admin`)
 Pages: Login · **Dashboard** (KPI cards, live map of online providers + active requests, alerts panel) · **Requests** (table, filters, row → detail with timeline, offers sequence, payment, map, actions: re-dispatch / assign / cancel / mark paid / refund) · **Providers** (table with status chips; detail with documents viewer, per-service approve/reject with reason, suspend/reinstate, stats, cancellation count) · **Customers** · **Pricing & Commission** · **Dispatch Settings** (per service timers/radius/max offers/stale threshold) · **Payments** · **Payouts** (queue with approve/reject/mark paid) · **Reports** (date range, CSV export) · **Audit Log** · **Admin Users**.
 - Real-time updates via Socket.IO; audible/visual alert for `admin.alert`.
 - Role-gated menus (FINANCE sees payments/payouts/reports; OPERATIONS sees requests/providers; SUPER_ADMIN all).
+
+### 12.4 Public website (`apps/admin-web`, route `/`)
+The public RoadAid website introduces the Abuja roadside-assistance service without exposing customer or provider web-app functionality. It must clearly present the three supported services (fuel delivery, towing and vehicle lockout), explain the request → sequential match → live tracking journey, direct customers to the unified mobile app, and invite qualified providers to register in the app. The `/admin` route remains available to authorised staff but is intentionally not linked or advertised on the public website.
+
+- Brand: RoadAid, “BUILT FOR CERTAINTY”, using the established shield/road mark and charcoal, warm-white and amber identity.
+- Claims must be grounded in implemented product behavior; do not invent testimonials, service volumes, response-time guarantees, coverage beyond Abuja or store availability.
+- Responsive and accessible across mobile and desktop, including keyboard focus, reduced-motion behavior, semantic headings and WCAG AA contrast.
+- Public routes remain informational only. Customers and providers still transact exclusively through the native mobile app.
 
 ---
 

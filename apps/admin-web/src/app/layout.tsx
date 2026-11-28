@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'RoadAid Operations Dashboard',
-  description: 'RoadAid roadside assistance administrative and dispatch console',
+  title: 'RoadAid — Roadside help, without the uncertainty',
+  description: 'Verified fuel delivery, towing and vehicle lockout assistance in Abuja.',
   icons: { icon: '/roadaid-mark.svg' },
 };
 
